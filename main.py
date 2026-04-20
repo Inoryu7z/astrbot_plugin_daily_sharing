@@ -58,13 +58,13 @@ class DailySharingPlugin(Star):
         self._bg_tasks = set()
         
         # 数据路径
-        self.data_dir = StarTools.get_data_dir("astrbot_plugin_daily_sharing")
+        self.data_dir = StarTools.get_data_dir("astrbot_plugin_daily_sharing_inoryu7z")
         self.data_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # 配置文件路径
         config_dir = self.data_dir.parent.parent / "config"
         config_dir.mkdir(parents=True, exist_ok=True)
-        self.config_file = config_dir / "astrbot_plugin_daily_sharing_config.json"
+        self.config_file = config_dir / "astrbot_plugin_daily_sharing_inoryu7z_config.json"
         
         # 数据库初始化
         self.db = DatabaseManager(self.data_dir)
