@@ -456,22 +456,70 @@ class ImageService:
     def get_last_description(self) -> Optional[str]:
         return self._last_image_description
 
+    async def _get_default_persona_name(self) -> Optional[str]:
+        """获取默认人格名称（用于联动aiimg自拍参考图）"""
+        try:
+            persona_mgr = getattr(self.context, "persona_manager", None)
+            if persona_mgr and hasattr(persona_mgr, "get_default_persona_v3"):
+                persona_obj = await persona_mgr.get_default_persona_v3()
+                if persona_obj:
+                    if isinstance(persona_obj, dict):
+                        for key in ("name", "persona_id", "id"):
+                            val = persona_obj.get(key)
+                            if val and str(val).strip():
+                                return str(val).strip()
+                    else:
+                        for attr in ("name", "persona_id", "id"):
+                            val = getattr(persona_obj, attr, None)
+                            if val and str(val).strip():
+                                return str(val).strip()
+        except Exception as e:
+            logger.debug(f"[DailySharing] 获取默认人格名失败: {e}")
+        return None
+
     async def _get_aiimg_reference_images(self) -> List[bytes]:
-        """从AI图像插件中提取参考图"""
+        """从AI图像插件中提取参考图
+        
+        新版 aiimg (v1.1+) 的自拍参考图采用「人格绑定」架构，
+        _get_selfie_reference_paths(event, persona_name) 在 persona_name=None 时
+        会直接返回空列表。因此必须先获取默认人格名称再传入。
+        若人格名不匹配，则兜底遍历 selfie_persona_1/2 配置直接读取参考图。
+        """
         aiimg = self._aiimg_plugin
         if not aiimg: return []
 
         try:
-            # 1. 优先从 WebUI 配置读取 (selfie_persona_1/2)
+            persona_name = await self._get_default_persona_name()
+            if persona_name:
+                logger.debug(f"[DailySharing] 获取到默认人格名称: {persona_name}")
+            else:
+                logger.debug("[DailySharing] 未获取到人格名称，将尝试遍历自拍配置")
+
             if hasattr(aiimg, "_get_selfie_reference_paths"):
-                # 新版aiimg插件使用异步方法获取参考图路径
-                ref_paths, source = await aiimg._get_selfie_reference_paths(None, persona_name=None)
+                ref_paths, source = await aiimg._get_selfie_reference_paths(None, persona_name=persona_name)
                 if ref_paths and hasattr(aiimg, "_read_paths_bytes"):
+                    logger.info(f"[DailySharing] 从AI图像插件获取到参考图 (来源: {source}, 数量: {len(ref_paths)})")
                     return await aiimg._read_paths_bytes(ref_paths)
-            
-            # 2. 兼容旧版：尝试从 RefStore 读取 
+
+                if not ref_paths and hasattr(aiimg, "_get_selfie_persona_config"):
+                    for idx in [1, 2]:
+                        conf = aiimg._get_selfie_persona_config(idx)
+                        if not conf:
+                            continue
+                        ref_list = conf.get("reference_images", [])
+                        if not isinstance(ref_list, list) or not ref_list:
+                            continue
+                        if hasattr(aiimg, "_resolve_data_rel_path"):
+                            paths = []
+                            for rel_path in ref_list:
+                                p = aiimg._resolve_data_rel_path(str(rel_path))
+                                if p and p.is_file():
+                                    paths.append(p)
+                            if paths and hasattr(aiimg, "_read_paths_bytes"):
+                                logger.info(f"[DailySharing] 从 selfie_persona_{idx} 遍历获取到参考图 (数量: {len(paths)})")
+                                return await aiimg._read_paths_bytes(paths)
+
             if hasattr(aiimg, "refs"):
-                # 尝试通用 key
                 ref_paths = await aiimg.refs.get_paths("bot_selfie")
                 if ref_paths and hasattr(aiimg, "_read_paths_bytes"):
                     return await aiimg._read_paths_bytes(ref_paths)
