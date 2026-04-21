@@ -310,7 +310,7 @@ class ContentService:
 
         dynamics_prompt = ""
         if ctx.get('recent_dynamics'):
-            dynamics_prompt = f"\n【你最近发过的动态回顾】\n{ctx['recent_dynamics']}\n(注：请保持人设连贯，可以偶尔自然呼应之前的心情，但绝对不要重复发过的内容)"
+            dynamics_prompt = f"\n【你最近发过的动态回顾】\n{ctx['recent_dynamics']}\n【注】请保持人设连贯，可以偶尔自然呼应之前的心情，但绝对不要重复发过的内容"
 
         target_str = "QQ空间" if is_qzone else ('群聊' if is_group else '私聊')
 
@@ -343,7 +343,6 @@ class ContentService:
 {greeting_constraint} 
 5. {'简短（80-100字）' if is_group else '可适当长一些（100-120字）'}
 6. 直接输出内容，不要解释
-7. 【重要】文案末尾必须附带情感标签，格式为：$$happy$$ (开心/期待/治愈), $$sad$$ (低落/深夜/晚安), $$angry$$ (吐槽), $$surprise$$ (吃瓜), $$neutral$$ (平淡)。只选一个。
 
 请生成{p_label}问候："""
 
@@ -416,7 +415,7 @@ class ContentService:
 
         dynamics_prompt = ""
         if ctx.get('recent_dynamics'):
-            dynamics_prompt = f"\n【你最近发过的动态回顾】\n{ctx['recent_dynamics']}\n(注：请保持人设连贯，可以偶尔自然呼应之前的心情，但绝对不要重复发过的内容)"
+            dynamics_prompt = f"\n【你最近发过的动态回顾】\n{ctx['recent_dynamics']}\n【注】请保持人设连贯，可以偶尔自然呼应之前的心情，但绝对不要重复发过的内容"
 
         target_str = "QQ空间" if is_qzone else ('群聊' if is_group else '私聊')
 
@@ -446,7 +445,6 @@ class ContentService:
 4. 基于当前真实时间感悟
 5. 字数：{'80-100字' if is_group else '100-120字'}
 6. 直接输出内容
-7. 【重要】文案末尾必须附带情感标签，格式为：$$happy$$ (开心/期待/治愈), $$sad$$ (低落/深夜/晚安), $$angry$$ (吐槽), $$surprise$$ (吃瓜), $$neutral$$ (平淡)。只选一个。
 
 你的随想："""
         
@@ -612,7 +610,7 @@ class ContentService:
 
         dynamics_prompt = ""
         if ctx.get('recent_dynamics'):
-            dynamics_prompt = f"\n【你最近发过的动态回顾】\n{ctx['recent_dynamics']}\n(注：请保持人设连贯，可以偶尔自然呼应之前的心情，但绝对不要重复发过的内容)"
+            dynamics_prompt = f"\n【你最近发过的动态回顾】\n{ctx['recent_dynamics']}\n【注】请保持人设连贯，可以偶尔自然呼应之前的心情，但绝对不要重复发过的内容"
 
         target_str = "QQ空间" if is_qzone else ('群聊' if is_group else '私聊')
 
@@ -659,7 +657,6 @@ class ContentService:
 6. 用【】标注热搜标题
 7. {'字数：120-150字' if is_group else '字数：150-200字'}
 8. 直接输出分享内容
-9. 【重要】文案末尾必须附带情感标签，格式为：$$happy$$, $$sad$$, $$angry$$, $$surprise$$, $$neutral$$。只选一个。
 
 直接输出："""
 
@@ -748,7 +745,7 @@ class ContentService:
 
         dynamics_prompt = ""
         if ctx.get('recent_dynamics'):
-            dynamics_prompt = f"\n【你最近发过的动态回顾】\n{ctx['recent_dynamics']}\n(注：请保持人设连贯，可以偶尔自然呼应之前的心情，但绝对不要重复发过的内容)"
+            dynamics_prompt = f"\n【你最近发过的动态回顾】\n{ctx['recent_dynamics']}\n【注】请保持人设连贯，可以偶尔自然呼应之前的心情，但绝对不要重复发过的内容"
 
         target_str = "QQ空间" if is_qzone else ('群聊' if is_group else '私聊')
 
@@ -795,7 +792,6 @@ class ContentService:
 4. 用【】将核心关键词【{target_keyword}】括起来。
 5. {'字数：100-120字' if is_group else '字数：120-150字'}。
 6. 直接输出分享内容。
-7. 【重要】文案末尾必须附带情感标签，格式为：$$happy$$, $$sad$$, $$angry$$, $$surprise$$, $$neutral$$。只选一个。
 """
         
         res = await self.call_llm(prompt=prompt, system_prompt=ctx['persona'])
@@ -891,7 +887,7 @@ class ContentService:
 
         dynamics_prompt = ""
         if ctx.get('recent_dynamics'):
-            dynamics_prompt = f"\n【你最近发过的动态回顾】\n{ctx['recent_dynamics']}\n(注：请保持人设连贯，可以偶尔自然呼应之前的心情，但绝对不要重复发过的内容)"
+            dynamics_prompt = f"\n【你最近发过的动态回顾】\n{ctx['recent_dynamics']}\n【注】请保持人设连贯，可以偶尔自然呼应之前的心情，但绝对不要重复发过的内容"
 
         target_str = "QQ空间" if is_qzone else ('群聊' if is_group else '私聊')
 
@@ -932,7 +928,6 @@ class ContentService:
 5. 务必用【】将推荐目标的名称【{target_work}】括起来。
 6. {'字数：100-120字' if is_group else '字数：120-150字'}。
 7. 直接输出推荐内容。
-8. 【重要】文案末尾必须附带情感标签，格式为：$$happy$$, $$sad$$, $$angry$$, $$surprise$$, $$neutral$$。只选一个。
 """
 
         res = await self.call_llm(prompt=prompt, system_prompt=ctx['persona'])

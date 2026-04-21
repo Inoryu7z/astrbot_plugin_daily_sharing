@@ -295,9 +295,6 @@ class ImageService:
     async def _assemble_final_prompt(self, content: str, sharing_type: SharingType, involves_self: bool, visuals: Dict) -> str:
         prompts = []
         comp_desc = "" 
-        
-        # 定义质量词
-        quality_tags = "8K分辨率, 高质量, 写实, 高分辨率, 细节丰富, 色彩鲜艳, 电影级光影效果"
 
         if self.debug_mode:
             logger.info("+" * 60)
@@ -394,9 +391,6 @@ class ImageService:
             else: prompts.append("白天, 自然光")
 
         if weather_vibe: prompts.append(weather_vibe)
-
-        # --- 3. 质量词 ---
-        prompts.append(quality_tags)
 
         final_result = ", ".join(filter(None, prompts))
         
