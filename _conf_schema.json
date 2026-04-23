@@ -121,7 +121,8 @@
         },
         "default": [
           "news",
-          "life_moment"
+          "life_moment",
+          "rant"
         ],
         "hint": "候选类型：greeting(问候), news(新闻), mood(心情), life_moment(日常), rant(吐槽), dream(梦境), recommendation(推荐)。系统会根据心情和时段智能选择，无需按顺序填。"
       },
@@ -133,7 +134,7 @@
         },
         "default": [
           "recommendation",
-          "news"
+          "life_moment"
         ],
         "hint": "候选类型：greeting(问候), news(新闻), mood(心情), life_moment(日常), rant(吐槽), dream(梦境), recommendation(推荐)。系统会根据心情和时段智能选择，无需按顺序填。"
       },
@@ -622,8 +623,8 @@
           "type": "string"
         },
         "default": [
-          "greeting",
-          "mood"
+          "mood",
+          "life_moment"
         ],
         "hint": "候选类型：greeting(问候), news(新闻), mood(心情), life_moment(日常), rant(吐槽), dream(梦境), recommendation(推荐)。系统会根据心情和时段智能选择。"
       },
@@ -634,7 +635,8 @@
           "type": "string"
         },
         "default": [
-          "mood"
+          "life_moment",
+          "rant"
         ],
         "hint": "候选类型：greeting(问候), news(新闻), mood(心情), life_moment(日常), rant(吐槽), dream(梦境), recommendation(推荐)。系统会根据心情和时段智能选择。"
       },
@@ -645,7 +647,8 @@
           "type": "string"
         },
         "default": [
-          "mood"
+          "life_moment",
+          "rant"
         ],
         "hint": "候选类型：greeting(问候), news(新闻), mood(心情), life_moment(日常), rant(吐槽), dream(梦境), recommendation(推荐)。系统会根据心情和时段智能选择。"
       },
@@ -656,7 +659,8 @@
           "type": "string"
         },
         "default": [
-          "mood"
+          "life_moment",
+          "recommendation"
         ],
         "hint": "候选类型：greeting(问候), news(新闻), mood(心情), life_moment(日常), rant(吐槽), dream(梦境), recommendation(推荐)。系统会根据心情和时段智能选择。"
       },
@@ -667,7 +671,8 @@
           "type": "string"
         },
         "default": [
-          "mood"
+          "mood",
+          "recommendation"
         ],
         "hint": "候选类型：greeting(问候), news(新闻), mood(心情), life_moment(日常), rant(吐槽), dream(梦境), recommendation(推荐)。系统会根据心情和时段智能选择。"
       },

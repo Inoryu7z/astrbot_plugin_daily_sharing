@@ -175,47 +175,67 @@ NEWS_TIME_PREFERENCES = {
     },
 }
 
-# 分享类型序列
+# 分享类型序列 — 群聊/私聊（社交场景，偏话题性和互动性）
 SHARING_TYPE_SEQUENCES = {
-    # ===== 凌晨时段 (0:00-6:00) =====
     TimePeriod.DAWN: [
-        SharingType.DREAM.value,       # 梦境分享
-        SharingType.MOOD.value,        # 深夜心情
+        SharingType.DREAM.value,
+        SharingType.MOOD.value,
     ],
-        
-    # ===== 早晨时段 (06:00-09:00) =====
     TimePeriod.MORNING: [
-        SharingType.GREETING.value,    # 第1次：早安问候
+        SharingType.GREETING.value,
     ],
-
-    # ===== 上午时段 (09:00-12:00) =====
     TimePeriod.FORENOON: [
-        SharingType.NEWS.value,        # 第1次：新闻热搜
-        SharingType.LIFE_MOMENT.value, # 第2次：日常碎片
-    ],    
-
-    # ===== 下午时段 (12:00-16:00) =====
+        SharingType.NEWS.value,
+        SharingType.LIFE_MOMENT.value,
+    ],
     TimePeriod.AFTERNOON: [
-        SharingType.NEWS.value,        # 第1次：新闻热搜
-        SharingType.LIFE_MOMENT.value, # 第2次：日常碎片
+        SharingType.NEWS.value,
+        SharingType.LIFE_MOMENT.value,
+        SharingType.RANT.value,
     ],
-
-    # ===== 傍晚时段 (16:00-19:00) =====
     TimePeriod.EVENING: [
-        SharingType.RECOMMENDATION.value,  # 第1次：推荐
-        SharingType.NEWS.value,        # 第2次：新闻热搜
+        SharingType.RECOMMENDATION.value,
+        SharingType.LIFE_MOMENT.value,
     ],
-
-    # ===== 晚上时段 (19:00-22:00) =====
     TimePeriod.NIGHT: [
-        SharingType.RECOMMENDATION.value, # 第1次：推荐
-        SharingType.MOOD.value,           # 第2次：晚间闲聊
+        SharingType.RECOMMENDATION.value,
+        SharingType.MOOD.value,
     ],
-
-    # ===== 深夜时段 (22:00-24:00) =====
     TimePeriod.LATE_NIGHT: [
-        SharingType.MOOD.value,        # 第1次：深夜心情
-        SharingType.DREAM.value,       # 第2次：梦境分享
+        SharingType.MOOD.value,
+        SharingType.DREAM.value,
+    ],
+}
+
+# QQ空间默认序列（个人日记场景，偏私密感和生活记录）
+QZONE_SHARING_TYPE_SEQUENCES = {
+    TimePeriod.DAWN: [
+        SharingType.DREAM.value,
+        SharingType.MOOD.value,
+    ],
+    TimePeriod.MORNING: [
+        SharingType.MOOD.value,
+        SharingType.LIFE_MOMENT.value,
+    ],
+    TimePeriod.FORENOON: [
+        SharingType.LIFE_MOMENT.value,
+        SharingType.RANT.value,
+    ],
+    TimePeriod.AFTERNOON: [
+        SharingType.LIFE_MOMENT.value,
+        SharingType.RANT.value,
+    ],
+    TimePeriod.EVENING: [
+        SharingType.LIFE_MOMENT.value,
+        SharingType.RECOMMENDATION.value,
+    ],
+    TimePeriod.NIGHT: [
+        SharingType.MOOD.value,
+        SharingType.RECOMMENDATION.value,
+    ],
+    TimePeriod.LATE_NIGHT: [
+        SharingType.MOOD.value,
+        SharingType.DREAM.value,
     ],
 }
 

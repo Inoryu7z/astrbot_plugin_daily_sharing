@@ -10,7 +10,7 @@ from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageChain
 from astrbot.api.message_components import Record, Video 
 
-from ..config import TimePeriod, SharingType, SHARING_TYPE_SEQUENCES, CRON_TEMPLATES, NEWS_SOURCE_MAP
+from ..config import TimePeriod, SharingType, SHARING_TYPE_SEQUENCES, QZONE_SHARING_TYPE_SEQUENCES, CRON_TEMPLATES, NEWS_SOURCE_MAP
 from .constants import CMD_CN_MAP, SOURCE_CN_MAP
 
 class TaskManager:
@@ -635,7 +635,8 @@ class TaskManager:
         seq = conf_node.get(config_key, [])
         
         if not seq:
-            seq = SHARING_TYPE_SEQUENCES.get(current_period, [SharingType.GREETING.value])
+            fallback = QZONE_SHARING_TYPE_SEQUENCES if is_qzone else SHARING_TYPE_SEQUENCES
+            seq = fallback.get(current_period, [SharingType.GREETING.value])
 
         last_type = state.get("last_type", "")
 
