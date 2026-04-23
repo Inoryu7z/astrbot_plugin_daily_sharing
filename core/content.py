@@ -9,7 +9,7 @@ from functools import partial
 from datetime import datetime
 from typing import Optional, Tuple, List, Dict
 from astrbot.api import logger
-from ..config import SharingType, TimePeriod, DEFAULT_KNOWLEDGE_CATS, DEFAULT_REC_CATS, NEWS_SOURCE_MAP
+from ..config import SharingType, TimePeriod, DEFAULT_REC_CATS, NEWS_SOURCE_MAP
 
 class ContentService:
     def __init__(self, config: Dict, llm_func, context, db_manager, news_service=None):
@@ -23,9 +23,6 @@ class ContentService:
         self.news_service = news_service
         
         self.content_lib_conf = self.config.get("content_library", {})
-        raw_knowledge = self.content_lib_conf.get("knowledge_cats", DEFAULT_KNOWLEDGE_CATS)
-        if not raw_knowledge: raw_knowledge = DEFAULT_KNOWLEDGE_CATS
-        self.knowledge_cats = self._parse_str_list_to_dict(raw_knowledge)
         raw_rec = self.content_lib_conf.get("rec_cats", DEFAULT_REC_CATS)
         if not raw_rec: raw_rec = DEFAULT_REC_CATS
         self.rec_cats = self._parse_str_list_to_dict(raw_rec)
@@ -36,6 +33,11 @@ class ContentService:
         self.news_conf = self.config.get("news_conf", {})
         self.llm_conf = self.config.get("llm_conf", {})
         self.context_conf = self.config.get("context_conf", {})
+        
+        self._daymind_plugin = None
+        self._daymind_not_found = False
+        self._dayflow_plugin = None
+        self._dayflow_not_found = False
 
     def _parse_str_list_to_dict(self, data_list: List[str]) -> Dict[str, List[str]]:
         """
@@ -98,8 +100,12 @@ class ContentService:
                 return await self._gen_news(news_data, ctx_data)
             elif stype == SharingType.MOOD:
                 return await self._gen_mood(period, ctx_data)
-            elif stype == SharingType.KNOWLEDGE:
-                return await self._gen_knowledge(ctx_data)
+            elif stype == SharingType.LIFE_MOMENT:
+                return await self._gen_life_moment(period, ctx_data)
+            elif stype == SharingType.RANT:
+                return await self._gen_rant(period, ctx_data)
+            elif stype == SharingType.DREAM:
+                return await self._gen_dream(period, ctx_data)
             elif stype == SharingType.RECOMMENDATION:
                 return await self._gen_rec(ctx_data)
             
@@ -117,76 +123,55 @@ class ContentService:
         """
         选题 Agent：专门负责从给定的类别中，结合历史记录，避坑并选出一个有趣的、不重复的话题/作品名。
         """
-        is_rec = category_type in self.rec_cats
-        db_category = "rec" if is_rec else "knowledge"
+        db_category = "rec"
         
         # 获取最近 N 天使用过的话题
         used_topics = await self.db.get_used_topics(target_id, db_category, days_limit=self.dedup_days)
         history_str = "、".join(used_topics) if used_topics else "无"
         
-        if is_rec:
-            # 推荐类 Prompt
-            constraint = ""
-            target_item_desc = "具体作品名称"
-            
-            # 针对不同类型的特殊约束
-            if category_type == "美食":
-                target_item_desc = "具体食物名称"
-                constraint = """
+        constraint = ""
+        target_item_desc = "具体作品名称"
+        
+        if category_type == "美食":
+            target_item_desc = "具体食物名称"
+            constraint = """
 【严重警告 - 类别约束】
 你现在推荐的类别是【美食】。
 严禁推荐任何动漫、电影、游戏、书籍或小说作品！
 严禁推荐《食戟之灵》、《中华小当家》、《黄金神威》等番剧！
 必须输出一个【现实中存在的、可以吃的】具体食物名称（如：螺蛳粉、北京烤鸭、臭豆腐）。
 """
-            elif category_type == "游戏":
-                target_item_desc = "具体游戏名称"
-                constraint = """
+        elif category_type == "游戏":
+            target_item_desc = "具体游戏名称"
+            constraint = """
 【严重警告 - 类别约束】
 你现在推荐的是【游戏】。
 请确保推荐的是具体的游戏名（如：塞尔达传说、星露谷物语、原神）。
 不要推荐游戏机硬件（如PS5、Switch），只推荐软件游戏本身。
 """
-            elif category_type == "好物":
-                target_item_desc = "具体物品/产品名称"
-                constraint = """
+        elif category_type == "好物":
+            target_item_desc = "具体物品/产品名称"
+            constraint = """
 【严重警告 - 类别约束】
 你现在推荐的是【生活好物/产品】。
 请推荐具体的物品种类或知名单品（如：洞洞板、机械键盘、气泡水机）。
 不要推荐过于抽象的概念。
 """
-            
-            system_prompt = "你是一个品味独特的资深鉴赏家和推荐官。"
-            user_prompt = f"""
+        
+        system_prompt = "你是一个品味独特的资深鉴赏家和推荐官。"
+        user_prompt = f"""
 任务：推荐一个【{sub_category}】风格的【{category_type}】{target_item_desc}。
 【已推荐过的列表(请绝对避开)】：{history_str}
 
 要求：
 1. 请优先选择【口碑极佳】的目标。
-2. 拒绝那些被推荐烂了的“教科书式标准答案”。
-3. 可以是经典名作，但最好能让人有“眼前一亮”或“值得重温”的感觉。
-4. 严禁输出上述“已推荐过的列表”中的内容，必须换一个新的。
+2. 拒绝那些被推荐烂了的"教科书式标准答案"。
+3. 可以是经典名作，但最好能让人有"眼前一亮"或"值得重温"的感觉。
+4. 严禁输出上述"已推荐过的列表"中的内容，必须换一个新的。
 5. 只输出名称，不要书名号，不要解释，不要标点。
 {constraint}
 """
-        else:
-            # === 知识类 Prompt ===
-            system_prompt = "你是一个眼光独到的科普博主和生活达人。"
-            user_prompt = f"""
-请输出一个属于【{category_type}-{sub_category}】领域的知识点关键词。
-【已分享过的列表(请绝对避开)】：{history_str}
 
-要求：
-1. 话题范围灵活：可以是【冷知识】、【常见误区】、【实用技巧】或【有趣现象】。
-2. 核心标准是“有趣”或“有用”：
-   - 如果是生活类，优先选实用性强的。
-   - 如果是科普类，优先选反直觉或颠覆认知的。
-   - 不要刻意追求“生僻难懂”，大众感兴趣的话题也可以。
-3. 严禁输出上述“已分享过的列表”中的内容，必须换一个新的。 
-4. 只输出关键词，不要任何解释，不要标点符号。
-"""
-
-        # 调用 LLM 
         res = await self.call_llm(prompt=user_prompt, system_prompt=system_prompt, timeout=15)
         if not res: return None
         
@@ -485,8 +470,6 @@ class ContentService:
         if search_type == "news":
             current_date = datetime.now().strftime("%Y年%m月%d日")
             search_query = f"{keyword} {current_date} 最新进展 实时动态 事件背景"
-        elif search_type == "knowledge":
-            search_query = f"什么是 {keyword} ？ 科普 原理 详细解释"
         elif search_type == "rec":
             search_query = f"{keyword} 作品简介 评价 核心亮点"
         else:
@@ -666,82 +649,311 @@ class ContentService:
             return f"{res}"
         return None 
 
-    async def _gen_knowledge(self, ctx: dict):
-        """生成知识分享，API 失败则使用 LLM 兜底"""
-        if not self.news_service:
-            logger.warning("[内容服务] 无法调用百度百科服务，无法查询相关资料，取消分享")
-            return None
 
+    # ==================== DayMind / DayFlow 集成 ====================
+
+    def _find_daymind_plugin(self):
+        if self._daymind_not_found:
+            return None
+        if self._daymind_plugin:
+            return self._daymind_plugin
+        try:
+            for p in self.context.get_all_stars():
+                p_name = getattr(p, "name", "")
+                if "daymind" in p_name:
+                    for attr in ("star_instance", "instance", "star_cls"):
+                        candidate = getattr(p, attr, None)
+                        if candidate and hasattr(candidate, "scheduler"):
+                            self._daymind_plugin = candidate
+                            logger.info("[内容服务] 已找到 DayMind 插件")
+                            return candidate
+            self._daymind_not_found = True
+        except Exception as e:
+            logger.debug(f"[内容服务] 查找 DayMind 插件失败: {e}")
+            self._daymind_not_found = True
+        return None
+
+    def _find_dayflow_plugin(self):
+        if self._dayflow_not_found:
+            return None
+        if self._dayflow_plugin:
+            return self._dayflow_plugin
+        try:
+            for p in self.context.get_all_stars():
+                p_name = getattr(p, "name", "")
+                if "dayflow" in p_name or "life_scheduler" in p_name:
+                    for attr in ("star_instance", "instance", "star_cls"):
+                        candidate = getattr(p, attr, None)
+                        if candidate and hasattr(candidate, "get_life_context"):
+                            self._dayflow_plugin = candidate
+                            logger.info("[内容服务] 已找到 DayFlow 插件")
+                            return candidate
+            self._dayflow_not_found = True
+        except Exception as e:
+            logger.debug(f"[内容服务] 查找 DayFlow 插件失败: {e}")
+            self._dayflow_not_found = True
+        return None
+
+    async def _get_daymind_mood(self) -> dict:
+        plugin = self._find_daymind_plugin()
+        if not plugin:
+            return {}
+        try:
+            scheduler = getattr(plugin, "scheduler", None)
+            if not scheduler:
+                return {}
+            persona_name = ""
+            try:
+                persona_mgr = getattr(self.context, "persona_manager", None)
+                if persona_mgr and hasattr(persona_mgr, "get_default_persona_v3"):
+                    persona_obj = await persona_mgr.get_default_persona_v3()
+                    if isinstance(persona_obj, dict):
+                        persona_name = persona_obj.get("name", "") or persona_obj.get("persona_id", "")
+                    elif persona_obj:
+                        persona_name = getattr(persona_obj, "name", "") or getattr(persona_obj, "persona_id", "")
+            except Exception:
+                pass
+            if not persona_name:
+                return {}
+            mood_data = scheduler.get_current_mood_for_persona(persona_name)
+            if mood_data:
+                logger.info(f"[内容服务] DayMind 心情: {mood_data.get('label', '?')} - {mood_data.get('reason', '?')}")
+            return mood_data or {}
+        except Exception as e:
+            logger.debug(f"[内容服务] 获取 DayMind 心情失败: {e}")
+            return {}
+
+    async def _get_dayflow_timeline_now(self) -> dict:
+        plugin = self._find_dayflow_plugin()
+        if not plugin:
+            return {}
+        try:
+            persona_name = ""
+            try:
+                persona_mgr = getattr(self.context, "persona_manager", None)
+                if persona_mgr and hasattr(persona_mgr, "get_default_persona_v3"):
+                    persona_obj = await persona_mgr.get_default_persona_v3()
+                    if isinstance(persona_obj, dict):
+                        persona_name = persona_obj.get("name", "") or persona_obj.get("persona_id", "")
+                    elif persona_obj:
+                        persona_name = getattr(persona_obj, "name", "") or getattr(persona_obj, "persona_id", "")
+            except Exception:
+                pass
+            data = await plugin.get_life_context(persona_name=persona_name if persona_name else None)
+            if not data or not isinstance(data, dict):
+                return {}
+            timeline = data.get("timeline", [])
+            outfit = data.get("outfit", "")
+            summary = data.get("summary", "")
+            weather = data.get("weather", "")
+            now = datetime.now()
+            now_mins = now.hour * 60 + now.minute
+            current_slot = None
+            for item in timeline:
+                try:
+                    ts = item.get("time_start", "")
+                    if ts:
+                        h, m = map(int, ts.split(':'))
+                        if h * 60 + m <= now_mins:
+                            current_slot = item
+                except Exception:
+                    pass
+            result = {
+                "current_slot": current_slot,
+                "outfit": outfit,
+                "summary": summary,
+                "weather": weather,
+                "timeline": timeline,
+            }
+            if current_slot:
+                logger.info(f"[内容服务] DayFlow 当前时段: {current_slot.get('title', '?')}")
+            return result
+        except Exception as e:
+            logger.debug(f"[内容服务] 获取 DayFlow 时间线失败: {e}")
+            return {}
+
+    # ==================== 梦境分享 ====================
+
+    async def _get_daymind_dreams(self) -> dict:
+        plugin = self._find_daymind_plugin()
+        if not plugin:
+            return {}
+        try:
+            scheduler = getattr(plugin, "scheduler", None)
+            if not scheduler:
+                return {}
+            persona_name = ""
+            try:
+                persona_mgr = getattr(self.context, "persona_manager", None)
+                if persona_mgr and hasattr(persona_mgr, "get_default_persona_v3"):
+                    persona_obj = await persona_mgr.get_default_persona_v3()
+                    if isinstance(persona_obj, dict):
+                        persona_name = persona_obj.get("name", "") or persona_obj.get("persona_id", "")
+                    elif persona_obj:
+                        persona_name = getattr(persona_obj, "name", "") or getattr(persona_obj, "persona_id", "")
+            except Exception:
+                pass
+            if not persona_name:
+                return {}
+
+            from datetime import date, timedelta
+            yesterday = (date.today() - timedelta(days=1)).isoformat()
+            today = date.today().isoformat()
+
+            dreams = scheduler.get_dream_history(persona_name, date=yesterday)
+            if not dreams:
+                dreams = scheduler.get_dream_history(persona_name, date=today)
+            if not dreams:
+                return {}
+
+            aftereffect = scheduler.get_dream_aftereffect_for_persona(persona_name)
+
+            result = {
+                "dreams": dreams,
+                "aftereffect": aftereffect,
+            }
+            logger.info(f"[内容服务] DayMind 梦境: {len(dreams)} 个梦")
+            return result
+        except Exception as e:
+            logger.debug(f"[内容服务] 获取 DayMind 梦境失败: {e}")
+            return {}
+
+    async def _gen_dream(self, period: TimePeriod, ctx: dict):
         is_group = ctx['is_group']
         is_qzone = ctx.get('target_id') == 'qzone_broadcast'
         call_name = ctx.get('nickname', '')
         detect_name = ctx.get('detect_name', '')
 
-        # 0. 获取配置
-        allow_detail = self.context_conf.get("group_share_schedule", False)
-        enable_tavily = self.news_conf.get("enable_tavily_search", True)
-        
-        # 随机选择大类和子类
-        main_cat = random.choice(list(self.knowledge_cats.keys()))
-        sub_cat = random.choice(self.knowledge_cats[main_cat])
-        target_id = ctx['target_id'] 
-        
-        logger.info(f"[内容服务] 知识方向: {main_cat} - {sub_cat}")
-
-        # 使用 Agent Brainstorming
-        target_keyword = await self._agent_brainstorm_topic(main_cat, sub_cat, target_id)
-        if not target_keyword:
-            logger.warning("[内容服务] 无法生成知识关键词，取消分享")
-            return None
-        
-        # 2. 并发查百度百科和 Tavily 搜索
-        baike_task = asyncio.create_task(self.news_service.get_baike_info(target_keyword))
-        tavily_task = asyncio.create_task(self._fetch_search_tavily(target_keyword, "knowledge")) if enable_tavily else None
-        
-        info = await baike_task
-        tavily_info = ""
-        if tavily_task:
-            _, tavily_info = await tavily_task
-        
-        if info or tavily_info:
-            baike_context = f"\n\n【参考资料（请基于以下真实数据进行通俗化讲解，绝对不要自行捏造）】\n"
-            if info:
-                baike_context += f"百度百科词条：{info}\n"
-            if tavily_info:
-                baike_context += f"全网检索：{tavily_info}\n"
-            logger.info(f"[内容服务] 知识资料获取成功: {target_keyword} (百度百科命中: {'是' if info else '否'}, Tavily 检索命中: {'是' if tavily_info else '否'})")
-        else:
-            logger.warning(f"[内容服务] 未命中任何外部资料，将使用 LLM 内部知识库兜底")
-            baike_context = f"\n\n【提示】暂无外部资料，请基于你自己的知识库，准确介绍【{target_keyword}】。"
-        
-        # 3. 称呼控制
         address_rule = ""
         user_info_prompt = ""
-
         if is_qzone:
-            address_rule = "【重要：QQ空间动态】这是你的个人动态，直接分享知识即可，绝对不要向别人提问，不要出现“你知道吗”、“大家知道吗”这样的互动词汇。"
-        elif is_group:
-            address_rule = "面向群友，可以使用'大家'、'你们'。"
-        else:
-            address_rule = "【重要：私聊模式】严禁使用'大家'、'你们'、'各位'。必须把你当做在和单个朋友聊天，使用'你'（例如：'你知道吗...'）。"
+            address_rule = '【重要：QQ空间动态】这是你的个人动态，记录昨晚的梦。绝对禁止对别人说话。'
+        elif not is_group:
+            address_rule = '【重要：私聊模式】像跟朋友说"我昨晚做了个梦"那样自然。'
             user_info_prompt = self._build_user_prompt(call_name, detect_name)
 
-        # 场景融合指令
-        context_instruction = ""
-        if is_group:
-             if allow_detail:
-                 context_instruction = "- 场景处理：可以结合你当下的真实状态（如工作中、休息中）来引出这个知识点，让分享更有人情味。"
-             else:
-                 context_instruction = "- 场景处理：请完全忽略天气，除非知识点与天气直接相关。如果状态忙碌，可以说“忙里偷闲推荐个”，否则直接分享知识即可。"
-        else:
-             context_instruction = """
-- 关联逻辑（重要）：
-  1. 关于天气：请忽略天气信息，除非这个知识点和天气直接相关。
-  2. 关于状态：请尝试将知识点与你【当前正在做的事】联系起来。
-     - 正在做饭 -> 分享生活小技巧
-     - 正在工作 -> 分享心理学/效率知识
-     - 如果实在联系不上，直接分享即可，不要强行找理由，也不要编造“突然想到”的心理活动。
-"""
+        dream_data = await self._get_daymind_dreams()
+
+        if not dream_data or not dream_data.get("dreams"):
+            return await self._gen_mood(period, ctx)
+
+        dreams = dream_data["dreams"]
+        aftereffect = dream_data.get("aftereffect")
+
+        dream_text_parts = []
+        for i, d in enumerate(dreams, 1):
+            content = d.get("content", "")
+            time_str = d.get("time", "")
+            if content:
+                prefix = f"第{i}个梦" if len(dreams) > 1 else "梦"
+                if time_str:
+                    prefix += f"（{time_str}）"
+                dream_text_parts.append(f"{prefix}：{content}")
+
+        dreams_str = "\n".join(dream_text_parts)
+
+        aftereffect_hint = ""
+        if aftereffect:
+            label = aftereffect.get("label", "")
+            reason = aftereffect.get("reason", "")
+            if label:
+                aftereffect_hint = f"【醒来后的余韵】{label}"
+                if reason:
+                    aftereffect_hint += f"——{reason}"
+
+        dynamics_prompt = ""
+        if ctx.get('recent_dynamics'):
+            dynamics_prompt = f"\n【你最近发过的动态回顾】\n{ctx['recent_dynamics']}\n【注】不要重复发过的内容"
+
+        target_str = "QQ空间" if is_qzone else ('群聊' if is_group else '私聊')
+
+        prompt = f"""
+【当前时间】{ctx['date_str']} {ctx['time_str']} ({ctx['period_label']})
+你想向{target_str}分享昨晚做的一个梦——那种醒来后还隐约记得的感觉。
+
+{user_info_prompt}
+{dynamics_prompt}
+{aftereffect_hint}
+{address_rule}
+
+【你昨晚的梦境】
+{dreams_str}
+
+【核心要求】
+这是一条"梦境分享"，不是复述梦的内容，而是用你自己的话把梦的感觉说出来。
+就像跟朋友说"我昨晚做了个超奇怪的梦"那样自然。
+
+【内容方向】
+- 用自己的话重新描述梦的片段，不要照搬上面的原文
+- 可以只提最印象深刻的那个画面或感觉
+- 可以加上醒来后的感受（"醒来后还觉得..."）
+- 如果做了多个梦，可以挑一个最有趣的说，也可以串联
+
+【严禁】
+- 严禁使用"看大家"、"既然"等评价群氛围的话
+- 严禁像写日记一样正式
+- 严禁编造梦里没有的内容
+- 严禁过度解读梦的含义（"这个梦意味着..."）
+
+要求：
+1. 以你的人设性格说话，真实自然
+2. 基于你的真实梦境来写，但用自己的话重新组织
+3. 像随口说出来的感觉，简短随意
+4. 字数：60-100字
+5. 直接输出内容
+
+你的梦境分享："""
+
+        return await self.call_llm(prompt=prompt, system_prompt=ctx['persona'])
+
+    # ==================== 日常碎片 & 吐槽 ====================
+
+    async def _gen_life_moment(self, period: TimePeriod, ctx: dict):
+        is_group = ctx['is_group']
+        is_qzone = ctx.get('target_id') == 'qzone_broadcast'
+        call_name = ctx.get('nickname', '')
+        detect_name = ctx.get('detect_name', '')
+
+        allow_detail = self.context_conf.get("group_share_schedule", False)
+
+        address_rule = ""
+        user_info_prompt = ""
+        if is_qzone:
+            address_rule = '【重要：QQ空间动态】这是你的个人动态，纯粹记录生活碎片。绝对禁止对别人说话，严禁出现"你"、"大家"等称呼。'
+        elif not is_group:
+            address_rule = "【重要：私聊模式】严禁使用'大家'、'你们'。像跟朋友随口说一句那样自然。"
+            user_info_prompt = self._build_user_prompt(call_name, detect_name)
+
+        daymind_mood = await self._get_daymind_mood()
+        dayflow_data = await self._get_dayflow_timeline_now()
+
+        mood_hint = ""
+        if daymind_mood:
+            label = daymind_mood.get("label", "")
+            reason = daymind_mood.get("reason", "")
+            sub_labels = daymind_mood.get("sub_labels", [])
+            if label:
+                mood_hint = f"【你的真实心情】{label}"
+                if sub_labels:
+                    mood_hint += f"（{'、'.join(sub_labels)}）"
+                if reason:
+                    mood_hint += f"——因为{reason}"
+
+        activity_hint = ""
+        if dayflow_data:
+            current_slot = dayflow_data.get("current_slot")
+            outfit = dayflow_data.get("outfit", "")
+            summary = dayflow_data.get("summary", "")
+            if current_slot:
+                title = current_slot.get("title", "")
+                detail = current_slot.get("detail", "")
+                activity_hint = f"【你当前正在做的事】{title}"
+                if detail:
+                    activity_hint += f"：{detail}"
+            if outfit:
+                activity_hint += f"\n【你今天的穿搭】{outfit}"
+            if summary:
+                activity_hint += f"\n【今日主题】{summary}"
 
         dynamics_prompt = ""
         if ctx.get('recent_dynamics'):
@@ -751,60 +963,122 @@ class ContentService:
 
         prompt = f"""
 【当前时间】{ctx['date_str']} {ctx['time_str']} ({ctx['period_label']})
-你现在的任务是：向{target_str}分享下面的冷知识。
+你想随手向{target_str}发一条日常碎片——就像朋友圈里那种随手拍随手写的感觉。
 
-【核心任务】
-1. 知识点关键词：【{target_keyword}】
-2. 基于下面的资料进行通俗化讲解。
-
-{baike_context}
 {user_info_prompt}
 {ctx['life_hint']}
 {ctx['chat_hint']}
 {dynamics_prompt}
-
-【拒绝神怪/脑补开头】
-- 严禁使用“脑子里突然蹦出”、“突然灵光一闪”、“不知怎么的突然想到”等描述思维跳跃的语句。
-- 严禁描述你大脑内部的运作过程。
-- 必须像个正常人类一样，自然地开启话题。
-
-【严重警告 - 拒绝尴尬开头】
-- 严禁说：“看大家聊得这么有文化”、“看你们都在聊窝被窝”。
-- 直接切入知识点，就像你刚知道这个想告诉朋友一样。
-- 请完全忽略群聊的上下文，直接开启新话题。
-
-【重要：称呼控制】
+{mood_hint}
+{activity_hint}
 {address_rule}
 
-【重要：场景融合】
-{context_instruction}
+【核心要求】
+这是一条"日常碎片"，不是正式分享，不是科普，不是推荐。
+就像你随手拿起手机打了一行字发出去的那种感觉。
 
-【开头方式】（自然流畅）
-- 直接知识型："你知道吗..." / "据说..."
-- 发现型："刚看到一个有趣的说法..."
-- 提问型："大家有没有想过..."
-- 场景关联型（私聊优先）："刚好在做XX，顺便分享一个..." (必须逻辑通顺)
+【内容方向】（从以下中选择一个最自然的）
+- 刚做完/正在做的一件小事（做饭、拆快递、泡咖啡、遛狗...）
+- 看到的一个小细节（窗外的云、路边的猫、食物的热气...）
+- 一个即兴的小想法（"如果XX就好了"、"突然觉得XX"...）
+- 一个小确幸（刚好赶上了、意外的好吃、被夸了一句...）
 
-【要求】
-1. 以你的人设性格说话，自然分享。
-2. {'语气轻松简洁' if is_group else '可以详细展开，带点个人见解'}。
-3. 可以加入你的个人感想或小评论
-4. 用【】将核心关键词【{target_keyword}】括起来。
-5. {'字数：100-120字' if is_group else '字数：120-150字'}。
-6. 直接输出分享内容。
-"""
-        
-        res = await self.call_llm(prompt=prompt, system_prompt=ctx['persona'])
-        
-        if res:
-            try:
-                matches = re.findall(r"【(.*?)】", res)
-                keyword = matches[0] if matches else target_keyword or res[:10]
-                await self.db.record_topic(target_id, "knowledge", keyword)
-            except: pass
-            
-            return f"知识类型: {main_cat} - {sub_cat}\n\n{res}"
-        return None
+【严禁】
+- 严禁使用"看大家"、"既然"等评价群氛围的话
+- 严禁像写日记一样正式，这不是日记
+- 严禁使用"脑子里突然蹦出"等描述思维过程的语句
+- 严禁编造不在日程中的活动
+
+要求：
+1. 以你的人设性格说话，真实自然
+2. 必须基于你的【真实日程】和【真实心情】来写
+3. 像随手打字一样简短随意
+4. 字数：60-90字
+5. 直接输出内容
+
+你的日常碎片："""
+
+        return await self.call_llm(prompt=prompt, system_prompt=ctx['persona'])
+
+    async def _gen_rant(self, period: TimePeriod, ctx: dict):
+        is_group = ctx['is_group']
+        is_qzone = ctx.get('target_id') == 'qzone_broadcast'
+        call_name = ctx.get('nickname', '')
+        detect_name = ctx.get('detect_name', '')
+
+        address_rule = ""
+        user_info_prompt = ""
+        if is_qzone:
+            address_rule = "【重要：QQ空间动态】纯粹的个人吐槽，不需要回应，不需要安慰。"
+        elif not is_group:
+            address_rule = "【重要：私聊模式】像跟朋友吐槽一样，不需要'大家'、'你们'。"
+            user_info_prompt = self._build_user_prompt(call_name, detect_name)
+
+        daymind_mood = await self._get_daymind_mood()
+        dayflow_data = await self._get_dayflow_timeline_now()
+
+        mood_hint = ""
+        if daymind_mood:
+            label = daymind_mood.get("label", "")
+            reason = daymind_mood.get("reason", "")
+            if label:
+                mood_hint = f"【你的真实心情】{label}"
+                if reason:
+                    mood_hint += f"——因为{reason}"
+
+        activity_hint = ""
+        if dayflow_data:
+            current_slot = dayflow_data.get("current_slot")
+            if current_slot:
+                title = current_slot.get("title", "")
+                detail = current_slot.get("detail", "")
+                activity_hint = f"【你当前正在做的事】{title}"
+                if detail:
+                    activity_hint += f"：{detail}"
+
+        dynamics_prompt = ""
+        if ctx.get('recent_dynamics'):
+            dynamics_prompt = f"\n【你最近发过的动态回顾】\n{ctx['recent_dynamics']}\n【注】请保持人设连贯，可以偶尔自然呼应之前的心情，但绝对不要重复发过的内容"
+
+        target_str = "QQ空间" if is_qzone else ('群聊' if is_group else '私聊')
+
+        prompt = f"""
+【当前时间】{ctx['date_str']} {ctx['time_str']} ({ctx['period_label']})
+你想向{target_str}吐槽一下——那种"小烦恼"，不是愤怒，是带点幽默的抱怨。
+
+{user_info_prompt}
+{ctx['chat_hint']}
+{mood_hint}
+{activity_hint}
+{dynamics_prompt}
+{address_rule}
+
+【核心要求】
+这是一条"吐槽碎碎念"，语气要轻松、带点自嘲或幽默。
+不是真的生气，是那种"唉又来了"的无奈感。
+
+【吐槽方向】（从以下中选择一个最贴合的）
+- 工作学习中的小挫折（改不完的bug、写不出的方案...）
+- 生活中的小不便（外卖送错、闹钟没响、排队太久...）
+- 天气/环境的小抱怨（太热/太冷/太吵...）
+- 社交中的小尴尬（说错话、忘记回消息...）
+
+【严禁】
+- 严禁真的愤怒或攻击性言论
+- 严禁使用"看大家"、"既然"等评价群氛围的话
+- 严禁编造不在日程中的场景
+- 严禁过度负能量，要有"吐槽完就好了"的轻松感
+
+要求：
+1. 以你的人设性格说话，真实自然
+2. 必须基于你的【真实日程】和【真实心情】来写
+3. 带点幽默或自嘲，不要太严肃
+4. 字数：60-90字
+5. 直接输出内容
+
+你的吐槽："""
+
+        return await self.call_llm(prompt=prompt, system_prompt=ctx['persona'])
 
     async def _gen_rec(self, ctx: dict):
         """生成推荐，API 失败则使用 LLM 兜底"""

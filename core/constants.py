@@ -5,7 +5,9 @@ TYPE_CN_MAP = {
     "greeting": "问候",
     "news": "新闻",
     "mood": "心情",
-    "knowledge": "知识",
+    "life_moment": "日常",
+    "rant": "吐槽",
+    "dream": "梦境",
     "recommendation": "推荐"
 }
 
@@ -14,7 +16,9 @@ CMD_CN_MAP = {
     "问候": SharingType.GREETING,
     "新闻": SharingType.NEWS,
     "心情": SharingType.MOOD,
-    "知识": SharingType.KNOWLEDGE,
+    "日常": SharingType.LIFE_MOMENT,
+    "吐槽": SharingType.RANT,
+    "梦境": SharingType.DREAM,
     "推荐": SharingType.RECOMMENDATION
 }
 

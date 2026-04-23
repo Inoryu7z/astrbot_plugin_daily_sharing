@@ -302,11 +302,11 @@ class DailySharingPlugin(Star):
     ):
         """
         主动分享日常内容、新闻热搜、获取热搜图片等。
-        当用户想要看新闻、热搜、早安晚安、冷知识、心情或推荐时调用此工具。
+        当用户想要看新闻、热搜、早安晚安、心情、日常碎片、吐槽、梦境或推荐时调用此工具。
         也支持获取"每天60s读世界"或"AI资讯快报"图片。
 
         Args:
-            share_type(string): 分享类型。支持：'自动', '问候', '新闻', '心情', '知识', '推荐', '60s新闻', 'AI资讯'。当用户没有明确指出发什么类型的内容（比如只说“发个说说”、“分享一下”）时，请务必将其设为 '自动'。
+            share_type(string): 分享类型。支持：'自动', '问候', '新闻', '心情', '日常', '吐槽', '梦境', '推荐', '60s新闻', 'AI资讯'。当用户没有明确指出发什么类型的内容（比如只说"发个说说"、"分享一下"）时，请务必将其设为 '自动'。
             source(string): 仅当 share_type 为'新闻'时有效。指定新闻平台。支持：微博, 知乎, B站, 抖音, 头条, 百度, 腾讯, 小红书, 夸克, 36氪, 51CTO, A站, 爱范儿, 网易, 新浪, 澎湃, 第一财经。如果不指定则留空。
             get_image(boolean): 仅当 share_type 为'新闻'时有效。默认为 True (优先分享热搜长图)。只有当用户明确要求“文字版”、“文本”、“不要图片”或“写一段新闻”时，才将其设为 False。
             need_image(boolean): 是否需要AI为这段文案配图。默认为 False。仅当用户明确说“配图”、“带图”、“发张图”时，才将其设为 True。
@@ -476,7 +476,7 @@ class DailySharingPlugin(Star):
                 try:
                     force_type = SharingType(arg)
                 except ValueError:
-                    yield event.plain_result(f"未知指令或无效类型: {arg}\n可用: 问候, 新闻, 心情, 知识, 推荐, 60s, ai")
+                    yield event.plain_result(f"未知指令或无效类型: {arg}\n可用: 问候, 新闻, 心情, 日常, 吐槽, 梦境, 推荐, 60s, ai")
                     return
 
             type_cn = TYPE_CN_MAP.get(force_type.value, arg)

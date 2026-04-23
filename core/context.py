@@ -427,8 +427,17 @@ class ContextService:
         elif sharing_type == SharingType.NEWS:
             return f"\n\n【当前场景】\n{full_status}\n结合你当前的状态(如所处环境/休闲/天气)自然地分享新闻\n"
             
-        elif sharing_type in (SharingType.KNOWLEDGE, SharingType.RECOMMENDATION):
+        elif sharing_type in (SharingType.RECOMMENDATION,):
             return f"\n\n【当前场景】\n{full_status}\n结合你当前的状态来切入分享\n"
+
+        elif sharing_type == SharingType.LIFE_MOMENT:
+            return f"\n\n【你的状态】\n{full_status}\n随手记录一下当前正在做的事或此刻的感受\n"
+
+        elif sharing_type == SharingType.RANT:
+            return f"\n\n【你的状态】\n{full_status}\n有什么小烦恼想吐槽一下\n"
+
+        elif sharing_type == SharingType.DREAM:
+            return f"\n\n【你的状态】\n{full_status}\n想分享昨晚做的一个梦\n"
 
         elif sharing_type == SharingType.MOOD:
             return f"\n\n【你的状态】\n{full_status}\n可以简单分享心情（结合天气或当前活动），但不要过于私人\n"
@@ -448,12 +457,21 @@ class ContextService:
         elif sharing_type == SharingType.NEWS:
             return f"\n\n【你当前真实状态】\n{context}\n\n你正在这个状态下偷闲刷手机，请根据当前状态合理描述（例如：工作时间就说是忙里偷闲；休息时间可以随意些）。\n"
             
-        elif sharing_type in (SharingType.KNOWLEDGE, SharingType.RECOMMENDATION):
+        elif sharing_type in (SharingType.RECOMMENDATION,):
             return (
                 f"\n\n【你当前真实状态】\n{context}\n\n"
                 "💡 请结合你【当前正在做的事】来自然地引出这个分享。\n"
                 "   (例如：如果正在工作，可以是为了解决工作问题；如果正在运动，可以是间隙的思考。)\n"
             )
+
+        elif sharing_type == SharingType.LIFE_MOMENT:
+            return f"\n\n【你当前真实状态】\n{context}\n\n随手记录一下此刻的生活碎片，就像发朋友圈一样自然\n"
+
+        elif sharing_type == SharingType.RANT:
+            return f"\n\n【你当前真实状态】\n{context}\n\n有什么小烦恼想吐槽一下，带点幽默感的那种\n"
+
+        elif sharing_type == SharingType.DREAM:
+            return f"\n\n【你当前真实状态】\n{context}\n\n想分享昨晚做的一个梦，那种醒来后还隐约记得的感觉\n"
             
         return ""
 

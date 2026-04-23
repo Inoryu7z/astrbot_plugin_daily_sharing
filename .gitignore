@@ -14,3 +14,4 @@ build/
 *.swo
 *~
 .DS_Store
+HANDOFF.md

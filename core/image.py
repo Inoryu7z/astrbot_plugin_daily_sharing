@@ -230,6 +230,21 @@ class ImageService:
                 parts.append("中景生活快照，看手机或屏幕")
             else:
                 parts.append("中景生活快照")
+        elif sharing_type == SharingType.LIFE_MOMENT:
+            if not action and not has_subj:
+                parts.append("随手拍风格，生活感，自然不做作")
+            else:
+                parts.append("生活快照，随意角度")
+        elif sharing_type == SharingType.RANT:
+            if not action and not has_subj:
+                parts.append("自拍，无奈表情，生活场景")
+            else:
+                parts.append("中景，带点情绪的姿态")
+        elif sharing_type == SharingType.DREAM:
+            if not action and not has_subj:
+                parts.append("半身自拍，若有所思的表情，柔和室内光")
+            else:
+                parts.append("中景生活照，自然姿态")
         elif sharing_type == SharingType.RECOMMENDATION:
             if not action and not has_subj:
                 parts.append("中景，展示物品，手部特写")
@@ -388,7 +403,7 @@ class ImageService:
                 if prompt_prefix:
                     final_prompt = f"{prompt_prefix}\n\n用户要求：{prompt}"
                 else:
-                    final_prompt = f"请根据参考图生成一张新的自拍照：\n1) 以第1张参考图的人脸身份为准（仅人脸身份特征），保持五官/气质一致。\n2) 如果还有其它参考图，请将它们仅作为服装/姿势/构图/场景的参考。\n3) 输出一张高质量照片风格自拍，不要拼图，不要水印。\n\n用户要求：{prompt}"
+                    final_prompt = f"以参考图中同一少女为基准，完整保留其五官、身材等全部人体特征，绝对禁止任何拼图，参考她的面部特征为其生成一张单人的自然生活照：她有着白皙细腻的皮肤，纤细的身姿与格外饱满的曲线形成鲜明对比，\n\n用户要求：{prompt}"
 
             if self.debug_mode:
                 logger.info("=" * 60)

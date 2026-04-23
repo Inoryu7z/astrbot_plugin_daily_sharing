@@ -227,7 +227,8 @@ class TaskManager:
 
     def setup_cron(self, cron_str):
         """设置自动分享触发器 (支持 cron 和 random_period)"""
-        trigger_mode = self.basic_conf.get("trigger_mode", "cron")
+        # 个人偏好：仅使用随机时间段模式，cron 配置项已从 UI 移除但代码保留
+        trigger_mode = self.basic_conf.get("trigger_mode", "random_period")
         
         if trigger_mode == "cron":
             self._setup_cron_job_custom("auto_share", cron_str, self._task_wrapper)
@@ -240,7 +241,8 @@ class TaskManager:
 
     def setup_qzone_cron(self):
         """设置 QQ 空间自动分享触发器"""
-        trigger_mode = self.qzone_conf.get("qzone_trigger_mode", "cron")
+        # 个人偏好：仅使用随机时间段模式，cron 配置项已从 UI 移除但代码保留
+        trigger_mode = self.qzone_conf.get("qzone_trigger_mode", "random_period")
         
         if trigger_mode == "cron":
             q_cron = self.qzone_conf.get("qzone_cron", "0 20 * * *")
@@ -414,7 +416,7 @@ class TaskManager:
             logger.warning(f"[DailySharing] 数据库清理失败: {e}")
 
         # 随机延迟逻辑
-        trigger_mode = self.basic_conf.get("trigger_mode", "cron")
+        trigger_mode = self.basic_conf.get("trigger_mode", "random_period")
         random_delay_min = 0
         if trigger_mode == "cron":
             try:
@@ -490,7 +492,7 @@ class TaskManager:
         """QQ空间任务触发器（处理防抖与随机延迟记录）"""
         if self.plugin._is_terminated: return
         
-        trigger_mode = self.qzone_conf.get("qzone_trigger_mode", "cron")
+        trigger_mode = self.qzone_conf.get("qzone_trigger_mode", "random_period")
         random_delay_min = 0
         if trigger_mode == "cron":
             try:
@@ -586,8 +588,7 @@ class TaskManager:
         return fallback_id
 
     async def decide_type_with_state(self, current_period: TimePeriod, is_qzone: bool = False, target_id: str = None, specific_type: str = "auto") -> SharingType:
-        """带目标ID状态的分享类型决定，支持自定义列表轮换"""
-        # 获取状态存储的 Key。QQ空间用 "qzone"；普通会话根据 ID 存储独立状态
+        """带目标ID状态的分享类型决定，支持自定义列表轮换 + 心情驱动加权随机"""
         if is_qzone:
             state_key = "qzone"
         else:
@@ -595,13 +596,10 @@ class TaskManager:
             
         state = await self.db.get_state(state_key, {})
 
-        # 处理用户填写的逗号自定义序列
         if specific_type and specific_type.lower() != "auto":
-            # 兼容中英文字符
             seq_str = specific_type.replace("，", ",")
             custom_seq = [s.strip().lower() for s in seq_str.split(",") if s.strip()]
             
-            # 如果解析出来的列表不仅仅只有一个 "auto"
             if custom_seq and custom_seq != ["auto"]:
                 idx_key = "custom_sequence_index"
                 idx = state.get(idx_key, 0)
@@ -610,26 +608,18 @@ class TaskManager:
                 selected_str = custom_seq[idx]
                 next_idx = (idx + 1) % len(custom_seq)
                 
-                # 保存这个群独立的序列进度
                 await self.db.update_state_dict(state_key, {
                     idx_key: next_idx, 
                     "last_timestamp": datetime.now().isoformat()
                 })
                 
-                # 如果当前轮到的单词不是 auto，直接返回该类型
                 if selected_str != "auto":
                     try: 
                         return SharingType(selected_str)
                     except ValueError:
-                        pass # 如果用户拼写错误导致无法识别，忽略并进入下方兜底
-                
-                # 如果轮到的单词刚好是 "auto"，系统会直接无视上面的返回，
-                # 顺滑地进入下方的“按当前时间段智能选择”代码块！
+                        pass
 
-        # 原有的按时间段智能判断序列（兜底与 Auto 专用）
         conf_node = self.qzone_conf if is_qzone else self.basic_conf
-        
-        # 映射序列前缀
         prefix = "qzone_" if is_qzone else ""
         config_key_map = {
             TimePeriod.MORNING: f"{prefix}morning_sequence",
@@ -646,25 +636,89 @@ class TaskManager:
         
         if not seq:
             seq = SHARING_TYPE_SEQUENCES.get(current_period, [SharingType.GREETING.value])
-        
-        idx_key = f"index_{current_period.value}"
-        idx = state.get(idx_key, 0)
-        
-        if idx >= len(seq): idx = 0
-        selected = seq[idx]
-        next_idx = (idx + 1) % len(seq)
-        
-        updates = {
+
+        last_type = state.get("last_type", "")
+
+        mood_candidates = await self._get_mood_driven_candidates(seq)
+
+        if mood_candidates:
+            candidates = mood_candidates
+        else:
+            candidates = seq
+
+        weights = []
+        for t in candidates:
+            if t == last_type:
+                weights.append(1)
+            else:
+                weights.append(3)
+
+        total = sum(weights)
+        if total == 0:
+            selected = candidates[0] if candidates else SharingType.GREETING.value
+        else:
+            r = random.random() * total
+            cumulative = 0
+            selected = candidates[0]
+            for t, w in zip(candidates, weights):
+                cumulative += w
+                if r <= cumulative:
+                    selected = t
+                    break
+
+        await self.db.update_state_dict(state_key, {
             "last_period": current_period.value,
-            idx_key: next_idx,            
-            "sequence_index": next_idx,  
             "last_timestamp": datetime.now().isoformat(),
             "last_type": selected
-        }
-        await self.db.update_state_dict(state_key, updates)
+        })
         
         try: return SharingType(selected)
         except: return SharingType.GREETING
+
+    async def _get_mood_driven_candidates(self, fallback_seq: list) -> list:
+        """根据 DayMind 心情数据筛选候选类型池"""
+        try:
+            content_svc = self.content_service
+            if not content_svc:
+                return []
+
+            mood_data = await content_svc._get_daymind_mood()
+            if not mood_data:
+                return []
+
+            label = mood_data.get("label", "")
+            if not label:
+                return []
+
+            positive_moods = {"开心", "放松", "期待", "安心"}
+            neutral_moods = {"平静"}
+            negative_moods = {"烦躁", "紧张", "委屈", "低落", "疲惫"}
+            dream_moods = {"疲惫", "低落", "平静"}
+
+            candidates = []
+
+            if label in positive_moods:
+                candidates = ["life_moment", "recommendation", "greeting"]
+            elif label in neutral_moods:
+                candidates = ["life_moment", "news", "mood"]
+            elif label in negative_moods:
+                candidates = ["rant", "mood", "life_moment"]
+
+            if label in dream_moods:
+                candidates.append("dream")
+
+            if not candidates:
+                return []
+
+            filtered = [c for c in candidates if c in fallback_seq]
+            if filtered:
+                return filtered
+
+            return candidates
+
+        except Exception as e:
+            logger.debug(f"[DailySharing] 心情驱动选择失败: {e}")
+            return []
 
     def _parse_targets_config(self, conf_list):
         """核心解析器：支持 群号:Cron时间:类型 这种三段式复杂写法"""
@@ -819,7 +873,7 @@ class TaskManager:
                             target_type_enum = v
                             break
                 if not target_type_enum:
-                    await event.send(event.plain_result(f"不支持的分享类型：{share_type}。支持：自动, 问候, 新闻, 心情, 知识, 推荐, 60s新闻, AI资讯。"))
+                    await event.send(event.plain_result(f"不支持的分享类型：{share_type}。支持：自动, 问候, 新闻, 心情, 日常, 吐槽, 梦境, 推荐, 60s新闻, AI资讯。"))
                     return
 
             # 映射新闻源 (中文 -> key)
@@ -1184,7 +1238,7 @@ class TaskManager:
                 img_path = None
                 video_url = None
                 enable_img_global = self.image_conf.get("enable_ai_image", False)
-                img_allowed_types = self.image_conf.get("image_enabled_types", ["greeting", "mood", "knowledge", "recommendation"])
+                img_allowed_types = self.image_conf.get("image_enabled_types", ["greeting", "mood", "life_moment", "recommendation"])
                 
                 # 【新闻类型特殊处理】如果未开启AI配图或当前类型不允许AI配图，但这是新闻，且配置允许附带热搜图，尝试把热搜图带上
                 if stype == SharingType.NEWS and self.image_conf.get("attach_hot_news_image", True):
@@ -1324,7 +1378,7 @@ class TaskManager:
             # 获取QQ空间配图允许类型，如果没配置，默认复用群聊分享的配置
             qzone_img_allowed_types = self.qzone_conf.get(
                 "qzone_image_enabled_types", 
-                self.image_conf.get("image_enabled_types", ["greeting", "mood", "knowledge", "recommendation"])
+                self.image_conf.get("image_enabled_types", ["greeting", "mood", "life_moment", "recommendation"])
             )
 
             if enable_img_qzone and enable_img_global:

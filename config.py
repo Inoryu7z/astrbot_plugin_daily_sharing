@@ -16,7 +16,9 @@ class SharingType(Enum):
     GREETING = "greeting"        # 问候
     NEWS = "news"               # 新闻见闻
     MOOD = "mood"               # 心情随想
-    KNOWLEDGE = "knowledge"     # 知识分享
+    LIFE_MOMENT = "life_moment"     # 日常碎片
+    RANT = "rant"               # 吐槽碎碎念
+    DREAM = "dream"             # 梦境分享
     RECOMMENDATION = "recommendation"  # 随机推荐（书籍/电影/音乐/动漫/美食）
 
 # Cron 模板
@@ -177,7 +179,8 @@ NEWS_TIME_PREFERENCES = {
 SHARING_TYPE_SEQUENCES = {
     # ===== 凌晨时段 (0:00-6:00) =====
     TimePeriod.DAWN: [
-        SharingType.MOOD.value,        # 深夜心情（通常不设置定时）
+        SharingType.DREAM.value,       # 梦境分享
+        SharingType.MOOD.value,        # 深夜心情
     ],
         
     # ===== 早晨时段 (06:00-09:00) =====
@@ -188,13 +191,13 @@ SHARING_TYPE_SEQUENCES = {
     # ===== 上午时段 (09:00-12:00) =====
     TimePeriod.FORENOON: [
         SharingType.NEWS.value,        # 第1次：新闻热搜
-        SharingType.KNOWLEDGE.value,   # 第2次：知识
+        SharingType.LIFE_MOMENT.value, # 第2次：日常碎片
     ],    
 
     # ===== 下午时段 (12:00-16:00) =====
     TimePeriod.AFTERNOON: [
         SharingType.NEWS.value,        # 第1次：新闻热搜
-        SharingType.KNOWLEDGE.value,   # 第2次：知识
+        SharingType.LIFE_MOMENT.value, # 第2次：日常碎片
     ],
 
     # ===== 傍晚时段 (16:00-19:00) =====
@@ -212,23 +215,10 @@ SHARING_TYPE_SEQUENCES = {
     # ===== 深夜时段 (22:00-24:00) =====
     TimePeriod.LATE_NIGHT: [
         SharingType.MOOD.value,        # 第1次：深夜心情
-        SharingType.GREETING.value,    # 第2次：晚安问候        
+        SharingType.DREAM.value,       # 第2次：梦境分享
     ],
 }
 
-# 默认知识库细分
-DEFAULT_KNOWLEDGE_CATS = {
-    "有趣的冷知识": "动物行为, 人体奥秘, 地理奇观, 历史误区, 语言文字, 植物智慧, 海洋生物, 昆虫视界, 真菌世界, 人体极限",
-    "生活小技巧": "收纳整理, 厨房妙招, 数码技巧, 省钱攻略, 应急处理, 衣物护理, 家居清洁, 园艺入门, 旅行打包, 急救常识",
-    "健康小常识": "睡眠科学, 饮食营养, 运动误区, 心理健康, 护眼护肤, 牙齿护理, 脱发自救, 饮水科学, 姿势矫正, 抗衰老",
-    "历史小故事": "古代发明, 名人轶事, 文明起源, 战争细节, 文物故事, 丝绸之路, 大航海时代, 工业革命, 文艺复兴, 古代货币",
-    "科学小发现": "天文宇宙, 平行宇宙, 生物进化, 未来科技, AI发展, 材料科学, 气象奥秘, 深海探测, 脑科学, 基因工程",
-    "心理学知识": "认知偏差, 社交心理, 情绪管理, 微表情, 行为经济学, 人格类型, 梦境解析, 记忆规律, 说服技巧, 色彩心理",
-    "艺术小百科": "名画赏析, 建筑风格, 设计美学, 色彩搭配, 流派演变, 博物馆巡礼, 传统工艺, 摄影构图, 书法篆刻, 音乐理论",
-    "商业冷思维": "营销陷阱, 品牌故事, 经济学原理, 消费心理, 投资误区, 商业模式, 广告玄机, 博弈论, 富人思维, 独角兽兴衰",
-    "哲学与逻辑": "著名悖论, 逻辑谬误, 思维模型, 存在主义, 伦理难题, 批判性思维, 奥卡姆剃刀, 墨菲定律, 斯多葛学派, 思想实验",
-    "职场进化论": "高效办公, 沟通话术, 时间管理, 汇报技巧, 向上管理, 面试心理, 团队协作, 摸鱼哲学, 领导力, 职业规划"
-}
 # 默认推荐库细分
 DEFAULT_REC_CATS = {
     "书籍": "悬疑推理, 当代文学, 历史传记, 科普新知, 商业思维, 治愈系绘本, 科幻神作, 哲学入门, 古典诗词, 艺术图鉴",
