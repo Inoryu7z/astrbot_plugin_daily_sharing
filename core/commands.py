@@ -1,7 +1,7 @@
 import asyncio
 from datetime import datetime
 from astrbot.api.event import AstrMessageEvent
-from ..config import SharingType, TimePeriod, SHARING_TYPE_SEQUENCES
+from ..config import SharingType, TimePeriod, SHARING_TYPE_SEQUENCES, QZONE_SHARING_TYPE_SEQUENCES
 from .constants import TYPE_CN_MAP
 
 class CommandHandler:
@@ -191,7 +191,8 @@ class CommandHandler:
         config_key = config_key_map.get(period)
         seq = conf_node.get(config_key, [])
         if not seq: 
-            seq = SHARING_TYPE_SEQUENCES.get(period, [])
+            fallback = QZONE_SHARING_TYPE_SEQUENCES if is_qzone else SHARING_TYPE_SEQUENCES
+            seq = fallback.get(period, [])
 
         idx_key = f"index_{period.value}"
         idx = state.get(idx_key, 0)
@@ -267,7 +268,8 @@ class CommandHandler:
             config_key = config_key_map.get(period)
             seq = conf_node.get(config_key, [])
             if not seq: 
-                seq = SHARING_TYPE_SEQUENCES.get(period, [])
+                fallback = QZONE_SHARING_TYPE_SEQUENCES if is_qzone else SHARING_TYPE_SEQUENCES
+                seq = fallback.get(period, [])
 
             if 0 <= target_idx < len(seq):
                 idx_key = f"index_{period.value}"
