@@ -1,3 +1,21 @@
+### v5.2.0
+**📸 配图架构重构：全面接入 aiimg 自拍模式**
+
+**1. 🤳 自拍模式全面替代**
+*   **彻底走自拍链路**：配图不再使用 draw（文生图）或 edit（通用图生图）模式，所有场景统一走 aiimg 插件的 selfie（自拍）模式，通过参考照保持人物形象一致性。
+*   **人格专属服务商链路**：正确使用 `chain_override` 参数，每个人格使用独立配置的服务商链路，而非全局 edit chain。
+*   **专业自拍提示词**：使用 aiimg 内置的 `_build_selfie_prompt()` 构建提示词，支持人格级别的 `prompt_prefix` 和 `default_output` 配置。
+*   **零降级策略**：自拍模式失败时直接报错，不降级到文生图。
+
+**2. 🧹 配置精简**
+*   移除 `use_gitee_selfie_ref`（不再需要，始终启用自拍模式）
+*   移除 `appearance_prompt`（外貌由参考照保证）
+*   移除 `image_always_include_self` / `image_never_include_self`（始终包含人物）
+*   移除 `selfie_ref_prompt`（改用 aiimg 内置提示词构建）
+
+**3. 📝 提示词优化**
+*   配图提示词从逗号分隔标签改为中文自然语言描述，更适配自拍模式的提示词模板。
+
 ### v5.1.1
 **🔍 资料准确性与防幻觉升级：全面接入 Tavily 联网检索**
 

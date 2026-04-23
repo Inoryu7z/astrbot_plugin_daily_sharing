@@ -456,19 +456,13 @@
         "description": "启用生成配图",
         "type": "bool",
         "default": false,
-        "hint": "需要安装 astrbot_plugin_gitee_aiimg 插件才能使用。"
+        "hint": "需要安装 astrbot_plugin_aiimg 插件并配置自拍参考照才能使用。配图将始终使用自拍模式（selfie_ref），通过参考照保持人物形象一致性。"
       },
       "attach_hot_news_image": {
         "description": "新闻热搜附带长图",
         "type": "bool",
         "default": true,
         "hint": "开启后，如果新闻热搜类型未生成配图，则发送新闻热搜长图。"
-      },
-      "use_gitee_selfie_ref": {
-        "description": "启用形象参考图",
-        "type": "bool",
-        "default": false,
-        "hint": "开启后，若判断需要画人，将尝试使用 astrbot_plugin_gitee_aiimg 插件中保存的形象参考图进行图生图以保持一致性。"
       },
       "priority_text_over_schedule": {
         "description": "文案主导构图",
@@ -517,24 +511,6 @@
         "type": "bool",
         "default": true,
         "hint": "对话历史中会包含图片的中文描述。"
-      },
-      "appearance_prompt": {
-        "description": "生成配图的人设外貌提示词",
-        "type": "text",
-        "default": "",
-        "hint": "留空则从人设自动提取外貌特征。"
-      },
-      "image_always_include_self": {
-        "description": "始终包含人物形象",
-        "type": "bool",
-        "default": false,
-        "hint": "开启后，所有配图都会包含人设的外貌特征。"
-      },
-      "image_never_include_self": {
-        "description": "从不包含人物形象",
-        "type": "bool",
-        "default": false,
-        "hint": "开启后，所有配图都只展示场景。"
       }
     }
   },
@@ -725,15 +701,5 @@
     "editor_language": "markdown",
     "editor_theme": "vs-dark",
     "default": "你是一个专业的 AI 绘画视觉导演。\n\n任务：根据用户的【分享文案】和【生活日程】，提取画面关键词。\n\n## 提取逻辑\n1. **分析主体**：首先判断文案是否在描述或推荐一个**具体物品**。\n - 如果是：该物品就是【subject】。\n - 如果否：【subject】填\"无\"。\n\n2. **分析背景**：\n{logic_prompt}\n\n3. **负向过滤**：**严禁**提取 {curr_hour}:00 之后的未来日程作为背景。\n\n## 提取要求\n1. **主体**：画面核心物体。\n2. **环境**：具体地点。\n3. **光影**：参考时间段[{time_hint}]。\n4. **穿搭**：{outfit_hint}\n5. **动作**：人物动作。\n\n请严格输出 JSON 格式：\n{{\n \"subject\": \"...\",\n \"environment\": \"...\",\n \"lighting\": \"...\",\n \"outfit\": \"...\",\n \"action\": \"...\",\n \"weather_vibe\": \"...\"\n}}"
-  },
-  "selfie_ref_prompt": {
-    "description": "自拍参考图提示词模板",
-    "hint": "自拍参考图生成提示词。支持变量：{prompt}。",
-    "type": "text",
-    "obvious_hint": true,
-    "editor_mode": true,
-    "editor_language": "markdown",
-    "editor_theme": "vs-dark",
-    "default": "请根据参考图生成一张新的生活照：\n\n1. 保持第1张参考图的人脸身份特征，保持五官/气质一致。\n2. 画面具体描述：{prompt}\n3. 输出高质量生活照片风格，不要拼图，不要水印。"
   }
 }
