@@ -2,7 +2,7 @@
   "personas": {
     "description": "🎭 多人格配置",
     "type": "template_list",
-    "hint": "为每个人格配置独立的分享参数。未配置的项将自动回退到全局设置。至少添加一个人格才能启用多人格模式。",
+    "hint": "为每个人格配置独立的分享参数。新建人格时默认值与全局设置相同，可按需修改。至少添加一个人格才能启用多人格模式。",
     "templates": {
       "persona": {
         "items": {
@@ -39,7 +39,7 @@
                 },
                 "description": "分享到群聊",
                 "default": [],
-                "hint": "格式：1. 仅群号=跟随全局 2. 群号:类型=仅指定类型。类型：greeting,news,mood,life_moment,rant,dream,recommendation。留空回退全局"
+                "hint": "格式：1. 仅群号=跟随全局 2. 群号:类型=仅指定类型。类型：greeting,news,mood,life_moment,rant,dream,recommendation。默认与全局相同，可修改"
               },
               "users": {
                 "title": "私聊独立配置",
@@ -49,36 +49,36 @@
                 },
                 "description": "分享到私聊",
                 "default": [],
-                "hint": "格式同群聊，将群号替换为QQ号。留空回退全局"
+                "hint": "格式同群聊，将群号替换为QQ号。默认与全局相同，可修改"
               }
             }
           },
           "persona_basic_conf": {
             "description": "⏰ 基础设置",
             "type": "object",
-            "hint": "该人格的独立基础设置，留空回退全局",
+            "hint": "该人格的独立基础设置，默认与全局相同，可修改",
             "items": {
               "trigger_mode": {
                 "description": "触发模式",
                 "type": "string",
-                "default": "",
+                "default": "random_period",
                 "options": [
                   "",
                   "random_period",
                   "cron"
                 ],
-                "hint": "random_period=在随机时段内随机触发 | cron=按Cron表达式固定时间触发。留空回退全局"
+                "hint": "random_period=在随机时段内随机触发 | cron=按Cron表达式固定时间触发。默认与全局相同，可修改"
               },
               "sharing_cron": {
                 "description": "Cron表达式",
                 "type": "string",
-                "default": "",
-                "hint": "仅cron模式生效，如 0 8,20 * * * 表示每天8点和20点。留空回退全局"
+                "default": "0 8,20 * * *",
+                "hint": "仅cron模式生效，如 0 8,20 * * * 表示每天8点和20点。默认与全局相同，可修改"
               },
               "sharing_type": {
                 "description": "分享类型策略",
                 "type": "string",
-                "default": "",
+                "default": "auto",
                 "options": [
                   "",
                   "auto",
@@ -90,7 +90,7 @@
                   "dream",
                   "recommendation"
                 ],
-                "hint": "auto=按心情驱动+时段序列智能选择（推荐） | 选具体类型则永远只发该类型。留空回退全局"
+                "hint": "auto=按心情驱动+时段序列智能选择（推荐） | 选具体类型则永远只发该类型。默认与全局相同，可修改"
               },
               "random_periods": {
                 "description": "随机分享时间段",
@@ -98,8 +98,11 @@
                 "items": {
                   "type": "string"
                 },
-                "default": [],
-                "hint": "仅random_period模式生效。格式：HH:MM-HH:MM。留空回退全局"
+                "default": [
+                  "08:00-10:00",
+                  "19:00-21:00"
+                ],
+                "hint": "仅random_period模式生效。格式：HH:MM-HH:MM。默认与全局相同，可修改"
               },
               "dawn_sequence": {
                 "description": "【序列】凌晨",
@@ -107,8 +110,11 @@
                 "items": {
                   "type": "string"
                 },
-                "default": [],
-                "hint": "auto模式下智能选择，无需按顺序填。候选：greeting,news,mood,life_moment,rant,dream,recommendation。留空回退全局"
+                "default": [
+                  "dream",
+                  "mood"
+                ],
+                "hint": "auto模式下智能选择，无需按顺序填。候选：greeting,news,mood,life_moment,rant,dream,recommendation。默认与全局相同，可修改"
               },
               "morning_sequence": {
                 "description": "【序列】早晨",
@@ -116,8 +122,10 @@
                 "items": {
                   "type": "string"
                 },
-                "default": [],
-                "hint": "auto模式下智能选择，无需按顺序填。候选：greeting,news,mood,life_moment,rant,dream,recommendation。留空回退全局"
+                "default": [
+                  "greeting"
+                ],
+                "hint": "auto模式下智能选择，无需按顺序填。候选：greeting,news,mood,life_moment,rant,dream,recommendation。默认与全局相同，可修改"
               },
               "forenoon_sequence": {
                 "description": "【序列】上午",
@@ -125,8 +133,11 @@
                 "items": {
                   "type": "string"
                 },
-                "default": [],
-                "hint": "auto模式下智能选择，无需按顺序填。候选：greeting,news,mood,life_moment,rant,dream,recommendation。留空回退全局"
+                "default": [
+                  "news",
+                  "life_moment"
+                ],
+                "hint": "auto模式下智能选择，无需按顺序填。候选：greeting,news,mood,life_moment,rant,dream,recommendation。默认与全局相同，可修改"
               },
               "afternoon_sequence": {
                 "description": "【序列】下午",
@@ -134,8 +145,12 @@
                 "items": {
                   "type": "string"
                 },
-                "default": [],
-                "hint": "auto模式下智能选择，无需按顺序填。候选：greeting,news,mood,life_moment,rant,dream,recommendation。留空回退全局"
+                "default": [
+                  "news",
+                  "life_moment",
+                  "rant"
+                ],
+                "hint": "auto模式下智能选择，无需按顺序填。候选：greeting,news,mood,life_moment,rant,dream,recommendation。默认与全局相同，可修改"
               },
               "evening_sequence": {
                 "description": "【序列】傍晚",
@@ -143,8 +158,11 @@
                 "items": {
                   "type": "string"
                 },
-                "default": [],
-                "hint": "auto模式下智能选择，无需按顺序填。候选：greeting,news,mood,life_moment,rant,dream,recommendation。留空回退全局"
+                "default": [
+                  "recommendation",
+                  "life_moment"
+                ],
+                "hint": "auto模式下智能选择，无需按顺序填。候选：greeting,news,mood,life_moment,rant,dream,recommendation。默认与全局相同，可修改"
               },
               "night_sequence": {
                 "description": "【序列】夜晚",
@@ -152,8 +170,11 @@
                 "items": {
                   "type": "string"
                 },
-                "default": [],
-                "hint": "auto模式下智能选择，无需按顺序填。候选：greeting,news,mood,life_moment,rant,dream,recommendation。留空回退全局"
+                "default": [
+                  "recommendation",
+                  "mood"
+                ],
+                "hint": "auto模式下智能选择，无需按顺序填。候选：greeting,news,mood,life_moment,rant,dream,recommendation。默认与全局相同，可修改"
               },
               "late_night_sequence": {
                 "description": "【序列】深夜",
@@ -161,27 +182,30 @@
                 "items": {
                   "type": "string"
                 },
-                "default": [],
-                "hint": "auto模式下智能选择，无需按顺序填。候选：greeting,news,mood,life_moment,rant,dream,recommendation。留空回退全局"
+                "default": [
+                  "mood",
+                  "dream"
+                ],
+                "hint": "auto模式下智能选择，无需按顺序填。候选：greeting,news,mood,life_moment,rant,dream,recommendation。默认与全局相同，可修改"
               }
             }
           },
           "persona_llm_conf": {
             "description": "🤖 模型与人设",
             "type": "object",
-            "hint": "该人格的独立模型配置，留空回退全局",
+            "hint": "该人格的独立模型配置，默认与全局相同，可修改",
             "items": {
               "llm_provider_id": {
                 "description": "LLM提供商",
                 "type": "string",
                 "default": "",
-                "hint": "为该人格指定独立的LLM提供商。不选择或指定失败后自动降级使用默认模型。留空回退全局",
+                "hint": "为该人格指定独立的LLM提供商。不选择或指定失败后自动降级使用默认模型。默认与全局相同，可修改",
                 "_special": "select_provider"
               },
               "llm_timeout": {
                 "description": "生成超时(秒)",
                 "type": "int",
-                "default": 0,
+                "default": 120,
                 "hint": "该人格的LLM生成内容最大等待时间（秒）。0表示回退全局"
               },
               "persona_id": {
@@ -196,18 +220,18 @@
           "persona_image_conf": {
             "description": "🎨 配图与视频",
             "type": "object",
-            "hint": "该人格的独立配图配置，留空回退全局",
+            "hint": "该人格的独立配图配置，默认与全局相同，可修改",
             "items": {
               "enable_ai_image": {
                 "description": "启用生成配图",
                 "type": "string",
-                "default": "",
+                "default": "false",
                 "options": [
                   "",
                   "true",
                   "false"
                 ],
-                "hint": "需要安装 astrbot_plugin_aiimg 插件并配置自拍参考照。留空回退全局"
+                "hint": "需要安装 astrbot_plugin_aiimg 插件并配置自拍参考照。默认与全局相同，可修改"
               },
               "image_enabled_types": {
                 "description": "允许配图的类型",
@@ -215,37 +239,43 @@
                 "items": {
                   "type": "string"
                 },
-                "default": [],
-                "hint": "仅当分享类型在列表中时才会生成图片。留空回退全局"
+                "default": [
+                  "greeting",
+                  "mood",
+                  "life_moment",
+                  "dream",
+                  "recommendation"
+                ],
+                "hint": "仅当分享类型在列表中时才会生成图片。默认与全局相同，可修改"
               },
               "enable_ai_video": {
                 "description": "启用生成视频",
                 "type": "string",
-                "default": "",
+                "default": "false",
                 "options": [
                   "",
                   "true",
                   "false"
                 ],
-                "hint": "需要 astrbot_plugin_gitee_aiimg 插件配置Grok，将配图转换为视频。留空回退全局"
+                "hint": "需要 astrbot_plugin_gitee_aiimg 插件配置Grok，将配图转换为视频。默认与全局相同，可修改"
               }
             }
           },
           "persona_tts_conf": {
             "description": "🗣️ 语音设置",
             "type": "object",
-            "hint": "该人格的独立TTS配置，留空回退全局",
+            "hint": "该人格的独立TTS配置，默认与全局相同，可修改",
             "items": {
               "enable_tts": {
                 "description": "启用语音转换",
                 "type": "string",
-                "default": "",
+                "default": "false",
                 "options": [
                   "",
                   "true",
                   "false"
                 ],
-                "hint": "必须先安装并配置好 astrbot_plugin_tts_emotion_router。留空回退全局"
+                "hint": "必须先安装并配置好 astrbot_plugin_tts_emotion_router。默认与全局相同，可修改"
               },
               "tts_enabled_types": {
                 "description": "允许语音的类型",
@@ -253,48 +283,51 @@
                 "items": {
                   "type": "string"
                 },
-                "default": [],
-                "hint": "仅当分享类型在列表中时才会生成语音。留空回退全局"
+                "default": [
+                  "greeting",
+                  "mood"
+                ],
+                "hint": "仅当分享类型在列表中时才会生成语音。默认与全局相同，可修改"
               }
             }
           },
           "persona_qzone_conf": {
             "description": "🌟 QQ空间说说",
             "type": "object",
-            "hint": "该人格的独立QQ空间配置，留空回退全局",
+            "hint": "该人格的独立QQ空间配置，默认与全局相同，可修改",
             "items": {
               "enable_qzone": {
                 "description": "启用定时分享说说",
                 "type": "string",
-                "default": "",
+                "default": "false",
                 "options": [
                   "",
                   "true",
                   "false"
                 ],
-                "hint": "开启后将按下方规则自动分享QQ空间说说。留空回退全局"
+                "hint": "开启后将按下方规则自动分享QQ空间说说。默认与全局相同，可修改"
               },
               "qzone_trigger_mode": {
                 "description": "说说触发模式",
                 "type": "string",
-                "default": "",
+                "default": "random_period",
                 "options": [
                   "",
                   "random_period",
                   "cron"
                 ],
-                "hint": "random_period=随机时段触发 | cron=固定时间触发。留空回退全局"
+                "hint": "random_period=随机时段触发 | cron=固定时间触发。默认与全局相同，可修改"
               },
               "qzone_cron": {
                 "description": "说说Cron表达式",
                 "type": "string",
-                "default": "",
-                "hint": "仅cron模式生效，如 0 20 * * * 表示每天20点。留空回退全局"
+                "default": "0 20 * * *",
+                "hint": "仅cron模式生效，如 0 20 * * * 表示每天20点。默认与全局相同，可修改"
               },
               "qzone_sharing_type": {
                 "description": "说说分享模式",
                 "type": "string",
-                "default": "",
+                "default": "auto",
                 "options": [
                   "",
                   "auto",
@@ -306,7 +339,7 @@
                   "dream",
                   "recommendation"
                 ],
-                "hint": "auto=智能选择 | 选具体类型则永远只发该类型。留空回退全局"
+                "hint": "auto=智能选择 | 选具体类型则永远只发该类型。默认与全局相同，可修改"
               },
               "qzone_random_periods": {
                 "description": "说说随机触发时间段",
@@ -314,19 +347,22 @@
                 "items": {
                   "type": "string"
                 },
-                "default": [],
-                "hint": "仅random_period模式生效。格式：HH:MM-HH:MM。留空回退全局"
+                "default": [
+                  "08:00-10:00",
+                  "19:00-21:00"
+                ],
+                "hint": "仅random_period模式生效。格式：HH:MM-HH:MM。默认与全局相同，可修改"
               },
               "qzone_enable_image": {
                 "description": "启用说说配图",
                 "type": "string",
-                "default": "",
+                "default": "false",
                 "options": [
                   "",
                   "true",
                   "false"
                 ],
-                "hint": "需在配图设置中开启生成配图总开关。留空回退全局"
+                "hint": "需在配图设置中开启生成配图总开关。默认与全局相同，可修改"
               },
               "qzone_dawn_sequence": {
                 "description": "【序列】凌晨",
@@ -334,8 +370,11 @@
                 "items": {
                   "type": "string"
                 },
-                "default": [],
-                "hint": "auto模式下智能选择，无需按顺序填。候选：greeting,news,mood,life_moment,rant,dream,recommendation。留空回退全局"
+                "default": [
+                  "dream",
+                  "mood"
+                ],
+                "hint": "auto模式下智能选择，无需按顺序填。候选：greeting,news,mood,life_moment,rant,dream,recommendation。默认与全局相同，可修改"
               },
               "qzone_morning_sequence": {
                 "description": "【序列】早晨",
@@ -343,8 +382,11 @@
                 "items": {
                   "type": "string"
                 },
-                "default": [],
-                "hint": "auto模式下智能选择，无需按顺序填。候选：greeting,news,mood,life_moment,rant,dream,recommendation。留空回退全局"
+                "default": [
+                  "mood",
+                  "life_moment"
+                ],
+                "hint": "auto模式下智能选择，无需按顺序填。候选：greeting,news,mood,life_moment,rant,dream,recommendation。默认与全局相同，可修改"
               },
               "qzone_forenoon_sequence": {
                 "description": "【序列】上午",
@@ -352,8 +394,11 @@
                 "items": {
                   "type": "string"
                 },
-                "default": [],
-                "hint": "auto模式下智能选择，无需按顺序填。候选：greeting,news,mood,life_moment,rant,dream,recommendation。留空回退全局"
+                "default": [
+                  "life_moment",
+                  "rant"
+                ],
+                "hint": "auto模式下智能选择，无需按顺序填。候选：greeting,news,mood,life_moment,rant,dream,recommendation。默认与全局相同，可修改"
               },
               "qzone_afternoon_sequence": {
                 "description": "【序列】下午",
@@ -361,8 +406,11 @@
                 "items": {
                   "type": "string"
                 },
-                "default": [],
-                "hint": "auto模式下智能选择，无需按顺序填。候选：greeting,news,mood,life_moment,rant,dream,recommendation。留空回退全局"
+                "default": [
+                  "life_moment",
+                  "rant"
+                ],
+                "hint": "auto模式下智能选择，无需按顺序填。候选：greeting,news,mood,life_moment,rant,dream,recommendation。默认与全局相同，可修改"
               },
               "qzone_evening_sequence": {
                 "description": "【序列】傍晚",
@@ -370,8 +418,11 @@
                 "items": {
                   "type": "string"
                 },
-                "default": [],
-                "hint": "auto模式下智能选择，无需按顺序填。候选：greeting,news,mood,life_moment,rant,dream,recommendation。留空回退全局"
+                "default": [
+                  "life_moment",
+                  "recommendation"
+                ],
+                "hint": "auto模式下智能选择，无需按顺序填。候选：greeting,news,mood,life_moment,rant,dream,recommendation。默认与全局相同，可修改"
               },
               "qzone_night_sequence": {
                 "description": "【序列】夜晚",
@@ -379,8 +430,11 @@
                 "items": {
                   "type": "string"
                 },
-                "default": [],
-                "hint": "auto模式下智能选择，无需按顺序填。候选：greeting,news,mood,life_moment,rant,dream,recommendation。留空回退全局"
+                "default": [
+                  "mood",
+                  "recommendation"
+                ],
+                "hint": "auto模式下智能选择，无需按顺序填。候选：greeting,news,mood,life_moment,rant,dream,recommendation。默认与全局相同，可修改"
               },
               "qzone_late_night_sequence": {
                 "description": "【序列】深夜",
@@ -388,53 +442,56 @@
                 "items": {
                   "type": "string"
                 },
-                "default": [],
-                "hint": "auto模式下智能选择，无需按顺序填。候选：greeting,news,mood,life_moment,rant,dream,recommendation。留空回退全局"
+                "default": [
+                  "mood",
+                  "dream"
+                ],
+                "hint": "auto模式下智能选择，无需按顺序填。候选：greeting,news,mood,life_moment,rant,dream,recommendation。默认与全局相同，可修改"
               }
             }
           },
           "persona_context_conf": {
             "description": "🧠 上下文与记忆",
             "type": "object",
-            "hint": "该人格的独立上下文配置，留空回退全局",
+            "hint": "该人格的独立上下文配置，默认与全局相同，可修改",
             "items": {
               "enable_life_context": {
                 "description": "启用生活上下文",
                 "type": "string",
-                "default": "",
+                "default": "true",
                 "options": [
                   "",
                   "true",
                   "false"
                 ],
-                "hint": "需要安装 astrbot_plugin_life_scheduler 插件，分享内容会结合虚拟生活状态。留空回退全局"
+                "hint": "需要安装 astrbot_plugin_life_scheduler 插件，分享内容会结合虚拟生活状态。默认与全局相同，可修改"
               },
               "life_context_in_group": {
                 "description": "启用群聊拟人化人设",
                 "type": "string",
-                "default": "",
+                "default": "true",
                 "options": [
                   "",
                   "true",
                   "false"
                 ],
-                "hint": "开启后群聊分享会带入生活状态与情绪，更具人味。留空回退全局"
+                "hint": "开启后群聊分享会带入生活状态与情绪，更具人味。默认与全局相同，可修改"
               },
               "group_share_schedule": {
                 "description": "启用群聊展示日程细节",
                 "type": "string",
-                "default": "",
+                "default": "false",
                 "options": [
                   "",
                   "true",
                   "false"
                 ],
-                "hint": "开启后群聊中也会提到具体日程安排，关闭则仅显示抽象状态。留空回退全局"
+                "hint": "开启后群聊中也会提到具体日程安排，关闭则仅显示抽象状态。默认与全局相同，可修改"
               },
               "reference_history_count": {
                 "description": "参考历史动态数",
                 "type": "int",
-                "default": -1,
+                "default": 3,
                 "hint": "生成新动态时参考最近N次历史，保持人设连贯并避免重复。-1表示回退全局"
               }
             }
@@ -442,12 +499,12 @@
           "persona_news_conf": {
             "description": "📰 新闻热搜",
             "type": "object",
-            "hint": "该人格的独立新闻配置，留空回退全局",
+            "hint": "该人格的独立新闻配置，默认与全局相同，可修改",
             "items": {
               "news_random_mode": {
                 "description": "新闻热搜源模式",
                 "type": "string",
-                "default": "",
+                "default": "config",
                 "options": [
                   "",
                   "fixed",
@@ -455,7 +512,7 @@
                   "config",
                   "time_based"
                 ],
-                "hint": "fixed=固定源 | random=全随机 | config=从列表随机 | time_based=按时段选择。留空回退全局"
+                "hint": "fixed=固定源 | random=全随机 | config=从列表随机 | time_based=按时段选择。默认与全局相同，可修改"
               },
               "news_random_sources": {
                 "description": "随机新闻热搜源列表",
@@ -463,13 +520,17 @@
                 "items": {
                   "type": "string"
                 },
-                "default": [],
-                "hint": "config/time_based模式生效，推荐2-5个。留空回退全局"
+                "default": [
+                  "zhihu",
+                  "weibo",
+                  "bili"
+                ],
+                "hint": "config/time_based模式生效，推荐2-5个。默认与全局相同，可修改"
               },
               "news_api_source": {
                 "description": "固定新闻热搜源",
                 "type": "string",
-                "default": "",
+                "default": "zhihu",
                 "options": [
                   "",
                   "zhihu",
@@ -490,7 +551,7 @@
                   "thepaper",
                   "yicai"
                 ],
-                "hint": "仅fixed模式生效。留空回退全局"
+                "hint": "仅fixed模式生效。默认与全局相同，可修改"
               }
             }
           }
