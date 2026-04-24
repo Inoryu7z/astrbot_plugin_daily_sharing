@@ -107,7 +107,8 @@ class TaskManager:
             self.scheduler.remove_job(jid)
 
         def add_custom_job(target_id, is_group, cron_str):
-            job_id = f"custom_share_{target_id}"
+            p = f"persona_{persona_name}_" if persona_name else ""
+            job_id = f"{p}custom_share_{target_id}"
             target_umo = f"{default_adapter_id}:{'GroupMessage' if is_group else 'FriendMessage'}:{target_id}"
             
             async def delayed_custom_execute():
@@ -120,14 +121,13 @@ class TaskManager:
                         logger.warning(f"[DailySharing] 独立任务 {target_id} 触发，系统繁忙排队中...")
                     async with self._lock:
                         logger.debug(f"[DailySharing] 独立时间到达，开始执行独立分享任务: {target_id}")
-                        await self.execute_share(specific_target=target_umo)
+                        await self.execute_share(specific_target=target_umo, persona_name=persona_name)
                 finally:
                     self.plugin._bg_tasks.discard(task)
 
             async def custom_wrapper():
                 if self.plugin._is_terminated: return
                 
-                # 独立群聊、私聊配置本身就是Cron触发，强制读取随机延迟配置
                 random_delay_min = 0
                 try:
                     random_delay_min = int(self.basic_conf.get("cron_random_delay", 0))
@@ -147,13 +147,12 @@ class TaskManager:
                         self.scheduler.add_job(
                             delayed_custom_execute, 'date',
                             run_date=target_time,
-                            id=f"delayed_custom_share_{target_id}",
+                            id=f"{p}delayed_custom_share_{target_id}",
                             replace_existing=True
                         )
                         logger.debug(f"[DailySharing] 独立任务 [{target_id}] 已触发，将随机延迟 {delay_seconds/60:.1f} 分钟，预计于 {time_str} 执行...")
                         return
                 
-                # 如果没配置延迟或延迟为0，立刻执行
                 await delayed_custom_execute()
 
             actual_cron = CRON_TEMPLATES.get(cron_str, cron_str)
@@ -183,45 +182,71 @@ class TaskManager:
         now = datetime.now()
         now_ts = now.timestamp()
         
-        # 主任务恢复
-        global_state = await self.db.get_state("global", {})
-        pending = global_state.get("pending_delay_job")
-        if pending:
-            target_ts = pending.get("target_time", 0)
-            if target_ts > now_ts:
-                run_time = datetime.fromtimestamp(target_ts)
-                self.scheduler.add_job(
-                    self._execute_delayed_task, 'date', run_date=run_time, id="resume_auto_share", replace_existing=True
-                )
-                logger.debug(f"[DailySharing] 已恢复未完成的延迟分享任务，将在 {run_time.strftime('%H:%M:%S')} 执行")
-            elif 0 <= now_ts - target_ts < 3600:  
-                run_time = now + timedelta(seconds=5)
-                self.scheduler.add_job(
-                    self._execute_delayed_task, 'date', run_date=run_time, id="resume_auto_share", replace_existing=True
-                )
-                logger.debug("[DailySharing] 检测到近期错过的延迟分享任务，即将执行补偿分享")
-            else:
-                await self.db.update_state_dict("global", {"pending_delay_job": None})
+        # 主任务恢复 (全局 + 人格级)
+        state_keys_to_check = ["global"]
+        for persona_entry in self.plugin.get_enabled_personas():
+            pname = persona_entry.get("persona_name") or persona_entry.get("name") or persona_entry.get("select_persona", "")
+            if pname:
+                canonical = self.plugin._canonical_persona_name(pname) or pname
+                state_keys_to_check.append(f"global_{canonical}")
 
-        # QQ空间任务恢复
-        qzone_state = await self.db.get_state("qzone", {})
-        q_pending = qzone_state.get("pending_delay_job")
-        if q_pending:
-            target_ts = q_pending.get("target_time", 0)
-            if target_ts > now_ts:
-                run_time = datetime.fromtimestamp(target_ts)
-                self.scheduler.add_job(
-                    self._execute_delayed_qzone_task, 'date', run_date=run_time, id="resume_qzone_share", replace_existing=True
-                )
-                logger.debug(f"[DailySharing] 已恢复未完成的QQ空间延迟任务，将在 {run_time.strftime('%H:%M:%S')} 执行")
-            elif 0 <= now_ts - target_ts < 3600:
-                run_time = now + timedelta(seconds=10)
-                self.scheduler.add_job(
-                    self._execute_delayed_qzone_task, 'date', run_date=run_time, id="resume_qzone_share", replace_existing=True
-                )
-                logger.debug("[DailySharing] 检测到近期错过的QQ空间延迟任务，即将执行补偿分享")
-            else:
-                await self.db.update_state_dict("qzone", {"pending_delay_job": None})
+        for state_key in state_keys_to_check:
+            persona_name_for_job = None
+            if state_key != "global":
+                persona_name_for_job = state_key.replace("global_", "", 1)
+            
+            g_state = await self.db.get_state(state_key, {})
+            pending = g_state.get("pending_delay_job")
+            if pending:
+                target_ts = pending.get("target_time", 0)
+                job_id = f"resume_auto_share_{persona_name_for_job}" if persona_name_for_job else "resume_auto_share"
+                if target_ts > now_ts:
+                    run_time = datetime.fromtimestamp(target_ts)
+                    self.scheduler.add_job(
+                        self._make_delayed_task(persona_name_for_job), 'date', run_date=run_time, id=job_id, replace_existing=True
+                    )
+                    logger.debug(f"[DailySharing] 已恢复未完成的延迟分享任务{'['+persona_name_for_job+']' if persona_name_for_job else ''}，将在 {run_time.strftime('%H:%M:%S')} 执行")
+                elif 0 <= now_ts - target_ts < 3600:  
+                    run_time = now + timedelta(seconds=5)
+                    self.scheduler.add_job(
+                        self._make_delayed_task(persona_name_for_job), 'date', run_date=run_time, id=job_id, replace_existing=True
+                    )
+                    logger.debug(f"[DailySharing] 检测到近期错过的延迟分享任务{'['+persona_name_for_job+']' if persona_name_for_job else ''}，即将执行补偿分享")
+                else:
+                    await self.db.update_state_dict(state_key, {"pending_delay_job": None})
+
+        # QQ空间任务恢复 (全局 + 人格级)
+        qzone_keys_to_check = ["qzone"]
+        for persona_entry in self.plugin.get_enabled_personas():
+            pname = persona_entry.get("persona_name") or persona_entry.get("name") or persona_entry.get("select_persona", "")
+            if pname:
+                canonical = self.plugin._canonical_persona_name(pname) or pname
+                qzone_keys_to_check.append(f"qzone_{canonical}")
+
+        for qzone_key in qzone_keys_to_check:
+            qzone_pname = None
+            if qzone_key != "qzone":
+                qzone_pname = qzone_key.replace("qzone_", "", 1)
+
+            qzone_state = await self.db.get_state(qzone_key, {})
+            q_pending = qzone_state.get("pending_delay_job")
+            if q_pending:
+                target_ts = q_pending.get("target_time", 0)
+                job_id = f"resume_qzone_share_{qzone_pname}" if qzone_pname else "resume_qzone_share"
+                if target_ts > now_ts:
+                    run_time = datetime.fromtimestamp(target_ts)
+                    self.scheduler.add_job(
+                        self._make_qzone_task_wrapper(qzone_pname), 'date', run_date=run_time, id=job_id, replace_existing=True
+                    )
+                    logger.debug(f"[DailySharing] 已恢复未完成的QQ空间延迟任务{'['+qzone_pname+']' if qzone_pname else ''}，将在 {run_time.strftime('%H:%M:%S')} 执行")
+                elif 0 <= now_ts - target_ts < 3600:
+                    run_time = now + timedelta(seconds=10)
+                    self.scheduler.add_job(
+                        self._make_qzone_task_wrapper(qzone_pname), 'date', run_date=run_time, id=job_id, replace_existing=True
+                    )
+                    logger.debug(f"[DailySharing] 检测到近期错过的QQ空间延迟任务{'['+qzone_pname+']' if qzone_pname else ''}，即将执行补偿分享")
+                else:
+                    await self.db.update_state_dict(qzone_key, {"pending_delay_job": None})
 
         # 独立群聊、私聊任务的延迟恢复
         # 使用统一方法解析适配器 ID
@@ -496,129 +521,6 @@ class TaskManager:
                     logger.debug(f"[DailySharing] {'人格 ['+persona_name+'] ' if persona_name else ''}今日QQ空间随机任务 [{period_str}] 已安排在: {run_time.strftime('%H:%M:%S')} 执行")
         return scheduler
 
-    async def _schedule_daily_random_jobs(self):
-        """每天计算并在 scheduler 中添加当天的随机时间点任务"""
-        if self.plugin._is_terminated: return
-        
-        job_ids = [job.id for job in self.scheduler.get_jobs() if job.id.startswith("random_share_")]
-        for jid in job_ids:
-            self.scheduler.remove_job(jid)
-            
-        periods = self.basic_conf.get("random_periods", ["08:00-10:00", "19:00-21:00"])
-        now = datetime.now()
-        date_str = now.strftime("%Y-%m-%d")
-        
-        state = await self.db.get_state("global", {})
-        random_schedule = state.get("random_schedule", {})
-        
-        is_modified = False
-        if random_schedule.get("date") != date_str:
-            random_schedule = {"date": date_str, "jobs": {}}
-            is_modified = True
-            
-        jobs = random_schedule.get("jobs", {})
-        
-        stale_periods = [p for p in jobs.keys() if p not in periods]
-        for p in stale_periods:
-            del jobs[p]
-            is_modified = True
-            
-        for period_str in periods:
-            if period_str not in jobs:
-                try:
-                    start_str, end_str = period_str.split('-')
-                    start_h, start_m = map(int, start_str.split(':'))
-                    end_h, end_m = map(int, end_str.split(':'))
-                    
-                    start_dt = now.replace(hour=start_h, minute=start_m, second=0, microsecond=0)
-                    end_dt = now.replace(hour=end_h, minute=end_m, second=59, microsecond=0)
-                    
-                    if end_dt <= start_dt:
-                        continue 
-                    
-                    random_seconds = random.randint(0, int((end_dt - start_dt).total_seconds()))
-                    run_time = start_dt + timedelta(seconds=random_seconds)
-                    
-                    jobs[period_str] = run_time.timestamp()
-                    is_modified = True
-                except Exception as e:
-                    logger.error(f"[DailySharing] 解析时间段 {period_str} 失败: {e}")
-                    
-        if is_modified:
-            random_schedule["jobs"] = jobs
-            await self.db.update_state_dict("global", {"random_schedule": random_schedule})
-        
-        for idx, (period_str, timestamp) in enumerate(jobs.items()):
-            run_time = datetime.fromtimestamp(timestamp)
-            if run_time > now:
-                job_id = f"random_share_{idx}"
-                self.scheduler.add_job(
-                    self._task_wrapper, 'date',
-                    run_date=run_time,
-                    id=job_id,
-                    replace_existing=True
-                )
-                logger.debug(f"[DailySharing] 今日随机任务 [{period_str}] 已安排在: {run_time.strftime('%H:%M:%S')} 执行")
-
-    async def _schedule_daily_qzone_random_jobs(self):
-        """QQ空间随机时间计算"""
-        if self.plugin._is_terminated: return
-        
-        job_ids = [job.id for job in self.scheduler.get_jobs() if job.id.startswith("qzone_random_share_")]
-        for jid in job_ids:
-            self.scheduler.remove_job(jid)
-            
-        periods = self.qzone_conf.get("qzone_random_periods", ["08:00-10:00", "19:00-21:00"])
-        now = datetime.now()
-        date_str = now.strftime("%Y-%m-%d")
-        
-        state = await self.db.get_state("qzone", {})
-        qzone_random_schedule = state.get("random_schedule", {})
-        
-        is_modified = False
-        if qzone_random_schedule.get("date") != date_str:
-            qzone_random_schedule = {"date": date_str, "jobs": {}}
-            is_modified = True
-            
-        jobs = qzone_random_schedule.get("jobs", {})
-        
-        stale_periods = [p for p in jobs.keys() if p not in periods]
-        for p in stale_periods:
-            del jobs[p]
-            is_modified = True
-            
-        for period_str in periods:
-            if period_str not in jobs:
-                try:
-                    start_str, end_str = period_str.split('-')
-                    start_h, start_m = map(int, start_str.split(':'))
-                    end_h, end_m = map(int, end_str.split(':'))
-                    
-                    start_dt = now.replace(hour=start_h, minute=start_m, second=0, microsecond=0)
-                    end_dt = now.replace(hour=end_h, minute=end_m, second=59, microsecond=0)
-                    if end_dt <= start_dt: 
-                        continue
-                    
-                    random_seconds = random.randint(0, int((end_dt - start_dt).total_seconds()))
-                    run_time = start_dt + timedelta(seconds=random_seconds)
-                    
-                    jobs[period_str] = run_time.timestamp()
-                    is_modified = True
-                except Exception as e:
-                    logger.error(f"[DailySharing] 解析QQ空间时间段 {period_str} 失败: {e}")
-                    
-        if is_modified:
-            qzone_random_schedule["jobs"] = jobs
-            await self.db.update_state_dict("qzone", {"random_schedule": qzone_random_schedule})
-        
-        for idx, (period_str, timestamp) in enumerate(jobs.items()):
-            run_time = datetime.fromtimestamp(timestamp)
-            if run_time > now:
-                job_id = f"qzone_random_share_{idx}"
-                self.scheduler.add_job(
-                    self._task_wrapper_qzone, 'date', run_date=run_time, id=job_id, replace_existing=True
-                )
-                logger.debug(f"[DailySharing] 今日QQ空间随机任务 [{period_str}] 已安排在: {run_time.strftime('%H:%M:%S')} 执行")
 
     def _setup_cron_job_custom(self, job_id: str, cron_str: str, func):
         """通用 Cron 设置方法"""
@@ -644,79 +546,6 @@ class TaskManager:
         except Exception as e:
             logger.error(f"[DailySharing] 任务[{job_id}]设置失败: {e}")
 
-    async def _task_wrapper(self):
-        """主任务触发器（处理防抖与随机延迟记录）"""
-        if self.plugin._is_terminated: return
-
-        # 执行数据库自动清理        
-        try:
-            days_limit = self.content_service.dedup_days
-            await self.db.clean_expired_data(days_limit)
-        except Exception as e:
-            logger.warning(f"[DailySharing] 数据库清理失败: {e}")
-
-        # 随机延迟逻辑
-        trigger_mode = self.basic_conf.get("trigger_mode", "random_period")
-        random_delay_min = 0
-        if trigger_mode == "cron":
-            try:
-                # 从配置获取随机延迟分钟数，默认为 0            
-                random_delay_min = int(self.basic_conf.get("cron_random_delay", 0))
-            except Exception:
-                pass
-
-        if random_delay_min > 0:
-            delay_seconds = random.randint(0, random_delay_min * 60)
-            if delay_seconds > 0:
-                target_time = datetime.now() + timedelta(seconds=delay_seconds)
-                time_str = target_time.strftime('%H:%M:%S')
-                
-                await self.db.update_state_dict("global", {
-                    "pending_delay_job": {"target_time": target_time.timestamp()}
-                })
-                
-                self.scheduler.add_job(
-                    self._execute_delayed_task, 'date',
-                    run_date=target_time,
-                    id="delayed_auto_share",
-                    replace_existing=True
-                )
-                
-                logger.debug(f"[DailySharing] 定时任务已触发，启用随机延迟策略。")
-                logger.debug(f"[DailySharing] 将延迟 {delay_seconds/60:.1f} 分钟，预计于 {time_str} 执行...")
-                return
-
-        await self._execute_delayed_task()
-
-    async def _execute_delayed_task(self):
-        """实际执行主分享任务"""
-        if self.plugin._is_terminated: return
-        task = asyncio.current_task()
-        self.plugin._bg_tasks.add(task)
-        
-        try:
-            await self.db.update_state_dict("global", {"pending_delay_job": None})
-
-            # 核心执行逻辑            
-            now = datetime.now()
-
-            # 防抖检查            
-            if self.plugin._last_share_time:
-                if (now - self.plugin._last_share_time).total_seconds() < 60:
-                    logger.debug("[DailySharing] 检测到近期已执行任务，跳过本次触发。")
-                    return
-            
-            if self._lock.locked():
-                logger.warning("[DailySharing] 上一个任务正在进行中，跳过本次触发。")
-                return
-
-            async with self._lock:
-                self.plugin._last_share_time = now
-                logger.info("[DailySharing] 开始执行分享任务...")
-                await self.execute_share()
-                
-        finally:
-            self.plugin._bg_tasks.discard(task)
 
     async def _task_wrapper_briefing(self):
         """早报任务回调"""
@@ -728,55 +557,6 @@ class TaskManager:
         finally:
             self.plugin._bg_tasks.discard(task)
 
-    async def _task_wrapper_qzone(self):
-        """QQ空间任务触发器（处理防抖与随机延迟记录）"""
-        if self.plugin._is_terminated: return
-        
-        trigger_mode = self.qzone_conf.get("qzone_trigger_mode", "random_period")
-        random_delay_min = 0
-        if trigger_mode == "cron":
-            try:
-                random_delay_min = int(self.basic_conf.get("cron_random_delay", 0))
-            except Exception:
-                pass
-
-        if random_delay_min > 0:
-            delay_seconds = random.randint(0, random_delay_min * 60)
-            if delay_seconds > 0:
-                target_time = datetime.now() + timedelta(seconds=delay_seconds)
-                time_str = target_time.strftime('%H:%M:%S')
-                
-                await self.db.update_state_dict("qzone", {
-                    "pending_delay_job": {"target_time": target_time.timestamp()}
-                })
-                
-                self.scheduler.add_job(
-                    self._execute_delayed_qzone_task, 'date',
-                    run_date=target_time,
-                    id="delayed_qzone_share",
-                    replace_existing=True
-                )
-                logger.debug(f"[DailySharing] QQ空间任务已触发，将随机延迟 {delay_seconds/60:.1f} 分钟，预计于 {time_str} 执行...")
-                return
-
-        await self._execute_delayed_qzone_task()
-
-    async def _execute_delayed_qzone_task(self):
-        """实际执行QQ空间分享任务"""
-        if self.plugin._is_terminated: return
-        task = asyncio.current_task()
-        self.plugin._bg_tasks.add(task)
-        
-        try:
-            await self.db.update_state_dict("qzone", {"pending_delay_job": None})
-
-            # 为了安全，这里也加上互斥锁，防止和群聊同时生成触发大模型并发限制            
-            async with self._lock:
-                logger.info("[DailySharing] 开始执行QQ空间分享任务...")
-                await self.execute_qzone_share()
-                
-        finally:
-            self.plugin._bg_tasks.discard(task)
 
     def get_curr_period(self) -> TimePeriod:
         h = datetime.now().hour
@@ -1224,7 +1004,7 @@ class TaskManager:
             recent_dynamics_str = ""
             ref_count = self.context_conf.get("reference_history_count", 3)
             if ref_count > 0:
-                recent_hist = await self.db.get_recent_history_by_target(uid, limit=ref_count)
+                recent_hist = await self.db.get_recent_history_by_target(uid, limit=ref_count, persona_name=persona_name or "")
                 if recent_hist:
                     lines = []
                     for h in reversed(recent_hist):
@@ -1449,7 +1229,7 @@ class TaskManager:
                 recent_dynamics_str = ""
                 ref_count = self.plugin.get_persona_config_value(persona_name, "persona_context_conf", "reference_history_count", None) or self.context_conf.get("reference_history_count", 3)
                 if ref_count > 0:
-                    recent_hist = await self.db.get_recent_history_by_target(uid, limit=ref_count)
+                    recent_hist = await self.db.get_recent_history_by_target(uid, limit=ref_count, persona_name=persona_name or "")
                     if recent_hist:
                         lines = []
                         for h in reversed(recent_hist):  
@@ -1569,7 +1349,7 @@ class TaskManager:
             
             # 如果是发新闻，单独获取热搜（支持手动指定源）
             if stype == SharingType.NEWS:
-                actual_source = news_source if news_source else self.news_service.select_news_source()
+                actual_source = news_source if news_source else self.news_service.select_news_source(persona_name=persona_name)
                 news_data = await self.news_service.get_hot_news(actual_source)
 
             # 屏蔽历史记录，使用纯净的提示词让LLM写说说
@@ -1586,7 +1366,7 @@ class TaskManager:
             qzone_recent_dynamics_str = ""
             ref_count = self.context_conf.get("reference_history_count", 3)
             if ref_count > 0:
-                q_recent_hist = await self.db.get_recent_history_by_target("qzone_broadcast", limit=ref_count)
+                q_recent_hist = await self.db.get_recent_history_by_target("qzone_broadcast", limit=ref_count, persona_name=persona_name or "")
                 if q_recent_hist:
                     lines = []
                     for h in reversed(q_recent_hist):
@@ -1612,13 +1392,9 @@ class TaskManager:
             qzone_images = []
             target_local_img = None
             
-            enable_img_qzone = self.plugin.get_persona_config_value(persona_name, "persona_qzone_conf", "enable_qzone", None)
+            enable_img_qzone = self.plugin.get_persona_config_value(persona_name, "persona_qzone_conf", "qzone_enable_image", None)
             if enable_img_qzone is None:
                 enable_img_qzone = self.qzone_conf.get("qzone_enable_image", False)
-            else:
-                enable_img_qzone = self.plugin.get_persona_config_value(persona_name, "persona_qzone_conf", "qzone_enable_image", None)
-                if enable_img_qzone is None:
-                    enable_img_qzone = self.qzone_conf.get("qzone_enable_image", False)
             enable_img_global = self.plugin.get_persona_config_value(persona_name, "persona_image_conf", "enable_ai_image", None)
             if enable_img_global is None:
                 enable_img_global = self.image_conf.get("enable_ai_image", False)

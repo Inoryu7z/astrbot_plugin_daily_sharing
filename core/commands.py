@@ -17,8 +17,7 @@ class CommandHandler:
         """启用插件"""
         self.config["enable_auto_sharing"] = True
         await self.plugin._save_config_file()
-        cron = self.basic_conf.get("sharing_cron", "0 8,20 * * *")
-        self.plugin.task_manager.setup_cron(cron)
+        self.plugin.task_manager.setup_tasks()
         if not self.plugin.scheduler.running: 
             self.plugin.scheduler.start()
         yield event.plain_result("自动分享已启用")
@@ -27,7 +26,8 @@ class CommandHandler:
         """禁用插件"""
         self.config["enable_auto_sharing"] = False
         await self.plugin._save_config_file()
-        self.plugin.scheduler.remove_all_jobs()
+        for job in self.plugin.scheduler.get_jobs():
+            self.plugin.scheduler.remove_job(job.id)
         yield event.plain_result("自动分享已禁用")
 
     async def cmd_status(self, event: AstrMessageEvent):
@@ -305,7 +305,7 @@ class CommandHandler:
     async def cmd_help(self, event: AstrMessageEvent):
         yield event.plain_result("""每日分享插件帮助:
 /分享 [类型] - 立即在当前会话生成分享 (默认文字模式)
-支持类型: 问候、新闻、心情、知识、推荐、60s、ai
+支持类型: 问候、新闻、心情、日常、吐槽、梦境、推荐、60s、ai
 
 【可用后缀】
  1. 广播：/分享 [类型] 广播 - 向所有配置的群聊、私聊发送

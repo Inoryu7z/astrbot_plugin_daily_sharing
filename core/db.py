@@ -154,21 +154,29 @@ class DatabaseManager:
     async def get_recent_history(self, limit: int = 5):
         return await self._execute(self._sync_get_recent_history, limit)
 
-    def _sync_get_recent_history_by_target(self, target_id: str, limit: int) -> List[Dict]:
+    def _sync_get_recent_history_by_target(self, target_id: str, limit: int, persona_name: str = "") -> List[Dict]:
         conn = self._get_conn()
         cursor = conn.cursor()
-        cursor.execute('''
-            SELECT created_at, sharing_type, content 
-            FROM sent_history 
-            WHERE target_id = ? AND success = 1
-            ORDER BY id DESC LIMIT ?
-        ''', (str(target_id), limit))
+        if persona_name:
+            cursor.execute('''
+                SELECT created_at, sharing_type, content 
+                FROM sent_history 
+                WHERE target_id = ? AND success = 1 AND persona_name = ?
+                ORDER BY id DESC LIMIT ?
+            ''', (str(target_id), str(persona_name), limit))
+        else:
+            cursor.execute('''
+                SELECT created_at, sharing_type, content 
+                FROM sent_history 
+                WHERE target_id = ? AND success = 1
+                ORDER BY id DESC LIMIT ?
+            ''', (str(target_id), limit))
         rows = cursor.fetchall()
         conn.close()
         return [{"timestamp": r[0], "type": r[1], "content": r[2]} for r in rows]
 
-    async def get_recent_history_by_target(self, target_id: str, limit: int = 3):
-        return await self._execute(self._sync_get_recent_history_by_target, target_id, limit)
+    async def get_recent_history_by_target(self, target_id: str, limit: int = 3, persona_name: str = ""):
+        return await self._execute(self._sync_get_recent_history_by_target, target_id, limit, persona_name)
 
     # ========== 话题去重 ==========
 

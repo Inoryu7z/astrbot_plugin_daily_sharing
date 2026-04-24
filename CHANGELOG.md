@@ -1,3 +1,15 @@
+### v5.5.2
+**🐛 多人格模式深度Bug修复 + 死代码清理**
+
+*   修复 `setup_custom_target_crons` 中 job_id 不含人格前缀，多人格共享目标群时 cron 任务互相覆盖
+*   修复 `execute_qzone_share` 未传递 `persona_name` 给新闻源选择，QQ空间分享始终使用全局配置
+*   修复 QQ空间配图开关逻辑混乱，错误地先查 `enable_qzone` 再查 `qzone_enable_image`
+*   修复帮助文本仍包含已移除的"知识"类型，补充"日常、吐槽、梦境"
+*   修复 `get_recent_history_by_target` 不按人格过滤，多人格动态记忆混在一起
+*   修复 `_recover_pending_jobs` 不恢复人格级延迟任务，Bot重启后人格级任务丢失
+*   修复 `cmd_enable`/`cmd_disable` 不适配多人格模式，禁用会删除所有人格任务
+*   清理6个已废弃的死代码方法（`_task_wrapper`、`_execute_delayed_task`、`_task_wrapper_qzone`、`_execute_delayed_qzone_task`、`_schedule_daily_random_jobs`、`_schedule_daily_qzone_random_jobs`）
+
 ### v5.5.1
 **🐛 多人格模式关键Bug修复**
 
