@@ -34,7 +34,9 @@
               "groups": {
                 "title": "群聊独立配置",
                 "type": "list",
-                "items": {"type": "string"},
+                "items": {
+                  "type": "string"
+                },
                 "description": "分享到群聊",
                 "default": [],
                 "hint": "格式同全局 receiver.groups"
@@ -42,7 +44,9 @@
               "users": {
                 "title": "私聊独立配置",
                 "type": "list",
-                "items": {"type": "string"},
+                "items": {
+                  "type": "string"
+                },
                 "description": "分享到私聊",
                 "default": [],
                 "hint": "格式同全局 receiver.users"
@@ -58,36 +62,135 @@
                 "description": "触发模式",
                 "type": "string",
                 "default": "",
-                "options": ["", "random_period", "cron"],
-                "hint": "留空回退全局。random_period=随机时段，cron=固定时间"
+                "options": [
+                  "",
+                  "random_period",
+                  "cron"
+                ],
+                "hint": "留空回退全局"
               },
               "sharing_cron": {
-                "description": "Cron表达式(仅cron模式)",
+                "description": "Cron表达式",
                 "type": "string",
                 "default": "",
-                "hint": "仅trigger_mode=cron时生效，如 0 8,20 * * *。留空回退全局"
+                "hint": "仅cron模式生效，如 0 8,20 * * *。留空回退全局",
+                "condition": {
+                  "trigger_mode": "cron"
+                }
               },
               "sharing_type": {
                 "description": "分享类型策略",
                 "type": "string",
                 "default": "",
-                "options": ["", "auto", "greeting", "news", "mood", "life_moment", "rant", "dream", "recommendation"],
+                "options": [
+                  "",
+                  "auto",
+                  "greeting",
+                  "news",
+                  "mood",
+                  "life_moment",
+                  "rant",
+                  "dream",
+                  "recommendation"
+                ],
                 "hint": "留空回退全局"
               },
               "random_periods": {
                 "description": "随机分享时间段",
                 "type": "list",
-                "items": {"type": "string"},
+                "items": {
+                  "type": "string"
+                },
                 "default": [],
-                "hint": "留空回退全局。格式：HH:MM-HH:MM"
+                "hint": "仅random_period模式生效。留空回退全局",
+                "condition": {
+                  "trigger_mode": "random_period"
+                }
               },
-              "dawn_sequence": {"description": "【序列】凌晨", "type": "list", "items": {"type": "string"}, "default": [], "hint": "留空回退全局"},
-              "morning_sequence": {"description": "【序列】早晨", "type": "list", "items": {"type": "string"}, "default": [], "hint": "留空回退全局"},
-              "forenoon_sequence": {"description": "【序列】上午", "type": "list", "items": {"type": "string"}, "default": [], "hint": "留空回退全局"},
-              "afternoon_sequence": {"description": "【序列】下午", "type": "list", "items": {"type": "string"}, "default": [], "hint": "留空回退全局"},
-              "evening_sequence": {"description": "【序列】傍晚", "type": "list", "items": {"type": "string"}, "default": [], "hint": "留空回退全局"},
-              "night_sequence": {"description": "【序列】夜晚", "type": "list", "items": {"type": "string"}, "default": [], "hint": "留空回退全局"},
-              "late_night_sequence": {"description": "【序列】深夜", "type": "list", "items": {"type": "string"}, "default": [], "hint": "留空回退全局"}
+              "dawn_sequence": {
+                "description": "【序列】凌晨",
+                "type": "list",
+                "items": {
+                  "type": "string"
+                },
+                "default": [],
+                "hint": "留空回退全局",
+                "condition": {
+                  "sharing_type": "auto"
+                }
+              },
+              "morning_sequence": {
+                "description": "【序列】早晨",
+                "type": "list",
+                "items": {
+                  "type": "string"
+                },
+                "default": [],
+                "hint": "留空回退全局",
+                "condition": {
+                  "sharing_type": "auto"
+                }
+              },
+              "forenoon_sequence": {
+                "description": "【序列】上午",
+                "type": "list",
+                "items": {
+                  "type": "string"
+                },
+                "default": [],
+                "hint": "留空回退全局",
+                "condition": {
+                  "sharing_type": "auto"
+                }
+              },
+              "afternoon_sequence": {
+                "description": "【序列】下午",
+                "type": "list",
+                "items": {
+                  "type": "string"
+                },
+                "default": [],
+                "hint": "留空回退全局",
+                "condition": {
+                  "sharing_type": "auto"
+                }
+              },
+              "evening_sequence": {
+                "description": "【序列】傍晚",
+                "type": "list",
+                "items": {
+                  "type": "string"
+                },
+                "default": [],
+                "hint": "留空回退全局",
+                "condition": {
+                  "sharing_type": "auto"
+                }
+              },
+              "night_sequence": {
+                "description": "【序列】夜晚",
+                "type": "list",
+                "items": {
+                  "type": "string"
+                },
+                "default": [],
+                "hint": "留空回退全局",
+                "condition": {
+                  "sharing_type": "auto"
+                }
+              },
+              "late_night_sequence": {
+                "description": "【序列】深夜",
+                "type": "list",
+                "items": {
+                  "type": "string"
+                },
+                "default": [],
+                "hint": "留空回退全局",
+                "condition": {
+                  "sharing_type": "auto"
+                }
+              }
             }
           },
           "persona_llm_conf": {
@@ -107,12 +210,6 @@
                 "type": "int",
                 "default": 0,
                 "hint": "0表示回退全局"
-              },
-              "use_persona": {
-                "description": "融合人设特征",
-                "type": "string",
-                "default": "",
-                "hint": "留空回退全局，true/false"
               },
               "persona_id": {
                 "description": "指定人设ID",
@@ -137,15 +234,23 @@
               "image_enabled_types": {
                 "description": "允许配图的类型",
                 "type": "list",
-                "items": {"type": "string"},
+                "items": {
+                  "type": "string"
+                },
                 "default": [],
-                "hint": "留空回退全局"
+                "hint": "留空回退全局",
+                "condition": {
+                  "enable_ai_image": "true"
+                }
               },
               "enable_ai_video": {
                 "description": "启用生成视频",
                 "type": "string",
                 "default": "",
-                "hint": "留空回退全局，true/false"
+                "hint": "留空回退全局，true/false",
+                "condition": {
+                  "enable_ai_image": "true"
+                }
               }
             }
           },
@@ -163,9 +268,14 @@
               "tts_enabled_types": {
                 "description": "允许语音的类型",
                 "type": "list",
-                "items": {"type": "string"},
+                "items": {
+                  "type": "string"
+                },
                 "default": [],
-                "hint": "留空回退全局"
+                "hint": "留空回退全局",
+                "condition": {
+                  "enable_tts": "true"
+                }
               }
             }
           },
@@ -184,42 +294,159 @@
                 "description": "说说触发模式",
                 "type": "string",
                 "default": "",
-                "options": ["", "random_period", "cron"],
-                "hint": "留空回退全局。random_period=随机时段，cron=固定时间"
+                "options": [
+                  "",
+                  "random_period",
+                  "cron"
+                ],
+                "hint": "留空回退全局",
+                "condition": {
+                  "enable_qzone": "true"
+                }
               },
               "qzone_cron": {
-                "description": "说说Cron表达式(仅cron模式)",
+                "description": "说说Cron表达式",
                 "type": "string",
                 "default": "",
-                "hint": "仅qzone_trigger_mode=cron时生效。留空回退全局"
+                "hint": "仅cron模式生效。留空回退全局",
+                "condition": {
+                  "enable_qzone": "true",
+                  "qzone_trigger_mode": "cron"
+                }
               },
               "qzone_sharing_type": {
                 "description": "说说分享模式",
                 "type": "string",
                 "default": "",
-                "options": ["", "auto", "greeting", "news", "mood", "life_moment", "rant", "dream", "recommendation"],
-                "hint": "留空回退全局"
+                "options": [
+                  "",
+                  "auto",
+                  "greeting",
+                  "news",
+                  "mood",
+                  "life_moment",
+                  "rant",
+                  "dream",
+                  "recommendation"
+                ],
+                "hint": "留空回退全局",
+                "condition": {
+                  "enable_qzone": "true"
+                }
               },
               "qzone_random_periods": {
                 "description": "说说随机触发时间段",
                 "type": "list",
-                "items": {"type": "string"},
+                "items": {
+                  "type": "string"
+                },
                 "default": [],
-                "hint": "留空回退全局"
+                "hint": "仅random_period模式生效。留空回退全局",
+                "condition": {
+                  "enable_qzone": "true",
+                  "qzone_trigger_mode": "random_period"
+                }
               },
               "qzone_enable_image": {
                 "description": "启用说说配图",
                 "type": "string",
                 "default": "",
-                "hint": "留空回退全局，true/false"
+                "hint": "留空回退全局，true/false",
+                "condition": {
+                  "enable_qzone": "true"
+                }
               },
-              "qzone_dawn_sequence": {"description": "【序列】凌晨", "type": "list", "items": {"type": "string"}, "default": [], "hint": "留空回退全局"},
-              "qzone_morning_sequence": {"description": "【序列】早晨", "type": "list", "items": {"type": "string"}, "default": [], "hint": "留空回退全局"},
-              "qzone_forenoon_sequence": {"description": "【序列】上午", "type": "list", "items": {"type": "string"}, "default": [], "hint": "留空回退全局"},
-              "qzone_afternoon_sequence": {"description": "【序列】下午", "type": "list", "items": {"type": "string"}, "default": [], "hint": "留空回退全局"},
-              "qzone_evening_sequence": {"description": "【序列】傍晚", "type": "list", "items": {"type": "string"}, "default": [], "hint": "留空回退全局"},
-              "qzone_night_sequence": {"description": "【序列】夜晚", "type": "list", "items": {"type": "string"}, "default": [], "hint": "留空回退全局"},
-              "qzone_late_night_sequence": {"description": "【序列】深夜", "type": "list", "items": {"type": "string"}, "default": [], "hint": "留空回退全局"}
+              "qzone_dawn_sequence": {
+                "description": "【序列】凌晨",
+                "type": "list",
+                "items": {
+                  "type": "string"
+                },
+                "default": [],
+                "hint": "留空回退全局",
+                "condition": {
+                  "enable_qzone": "true",
+                  "qzone_sharing_type": "auto"
+                }
+              },
+              "qzone_morning_sequence": {
+                "description": "【序列】早晨",
+                "type": "list",
+                "items": {
+                  "type": "string"
+                },
+                "default": [],
+                "hint": "留空回退全局",
+                "condition": {
+                  "enable_qzone": "true",
+                  "qzone_sharing_type": "auto"
+                }
+              },
+              "qzone_forenoon_sequence": {
+                "description": "【序列】上午",
+                "type": "list",
+                "items": {
+                  "type": "string"
+                },
+                "default": [],
+                "hint": "留空回退全局",
+                "condition": {
+                  "enable_qzone": "true",
+                  "qzone_sharing_type": "auto"
+                }
+              },
+              "qzone_afternoon_sequence": {
+                "description": "【序列】下午",
+                "type": "list",
+                "items": {
+                  "type": "string"
+                },
+                "default": [],
+                "hint": "留空回退全局",
+                "condition": {
+                  "enable_qzone": "true",
+                  "qzone_sharing_type": "auto"
+                }
+              },
+              "qzone_evening_sequence": {
+                "description": "【序列】傍晚",
+                "type": "list",
+                "items": {
+                  "type": "string"
+                },
+                "default": [],
+                "hint": "留空回退全局",
+                "condition": {
+                  "enable_qzone": "true",
+                  "qzone_sharing_type": "auto"
+                }
+              },
+              "qzone_night_sequence": {
+                "description": "【序列】夜晚",
+                "type": "list",
+                "items": {
+                  "type": "string"
+                },
+                "default": [],
+                "hint": "留空回退全局",
+                "condition": {
+                  "enable_qzone": "true",
+                  "qzone_sharing_type": "auto"
+                }
+              },
+              "qzone_late_night_sequence": {
+                "description": "【序列】深夜",
+                "type": "list",
+                "items": {
+                  "type": "string"
+                },
+                "default": [],
+                "hint": "留空回退全局",
+                "condition": {
+                  "enable_qzone": "true",
+                  "qzone_sharing_type": "auto"
+                }
+              }
             }
           },
           "persona_context_conf": {
@@ -237,13 +464,19 @@
                 "description": "启用群聊拟人化人设",
                 "type": "string",
                 "default": "",
-                "hint": "留空回退全局，true/false"
+                "hint": "留空回退全局，true/false",
+                "condition": {
+                  "enable_life_context": "true"
+                }
               },
               "group_share_schedule": {
                 "description": "启用群聊展示日程细节",
                 "type": "string",
                 "default": "",
-                "hint": "留空回退全局，true/false"
+                "hint": "留空回退全局，true/false",
+                "condition": {
+                  "enable_life_context": "true"
+                }
               },
               "reference_history_count": {
                 "description": "参考历史动态数",
@@ -262,22 +495,55 @@
                 "description": "新闻热搜源模式",
                 "type": "string",
                 "default": "",
-                "options": ["", "fixed", "random", "config", "time_based"],
+                "options": [
+                  "",
+                  "fixed",
+                  "random",
+                  "config",
+                  "time_based"
+                ],
                 "hint": "留空回退全局"
               },
               "news_random_sources": {
                 "description": "随机新闻热搜源列表",
                 "type": "list",
-                "items": {"type": "string"},
+                "items": {
+                  "type": "string"
+                },
                 "default": [],
-                "hint": "留空回退全局"
+                "hint": "config/time_based模式生效。留空回退全局",
+                "condition": {
+                  "news_random_mode": "config"
+                }
               },
               "news_api_source": {
                 "description": "固定新闻热搜源",
                 "type": "string",
                 "default": "",
-                "options": ["", "zhihu", "weibo", "bili", "xiaohongshu", "douyin", "toutiao", "baidu", "tencent", "quark", "36kr", "51cto", "acfun", "ifanr", "netease", "sina", "thepaper", "yicai"],
-                "hint": "留空回退全局"
+                "options": [
+                  "",
+                  "zhihu",
+                  "weibo",
+                  "bili",
+                  "xiaohongshu",
+                  "douyin",
+                  "toutiao",
+                  "baidu",
+                  "tencent",
+                  "quark",
+                  "36kr",
+                  "51cto",
+                  "acfun",
+                  "ifanr",
+                  "netease",
+                  "sina",
+                  "thepaper",
+                  "yicai"
+                ],
+                "hint": "仅fixed模式生效。留空回退全局",
+                "condition": {
+                  "news_random_mode": "fixed"
+                }
               }
             }
           }
@@ -307,7 +573,7 @@
         "title": "目标适配器ID",
         "type": "string",
         "default": "",
-        "hint": "指定消息发送的目标适配器ID（如 aiocqhttp）。留空则自动发现。若指定的适配器未加载，将记录错误并降级到自动发现。"
+        "hint": "指定消息发送的目标适配器ID（如 aiocqhttp）。留空则自动发现。"
       },
       "groups": {
         "title": "群聊独立配置",
@@ -317,7 +583,7 @@
         },
         "description": "分享到群聊",
         "default": [],
-        "hint": "多种格式：1. 仅群号 = 跟随全局 2. 群号:类型 = 仅指定类型。类型填英文：greeting(问候), news(新闻), mood(心情), life_moment(日常), rant(吐槽), dream(梦境), recommendation(推荐)。例如: 123456 、 123456:mood,life_moment"
+        "hint": "格式：1. 仅群号=跟随全局 2. 群号:类型=仅指定类型。类型：greeting,news,mood,life_moment,rant,dream,recommendation"
       },
       "users": {
         "title": "私聊独立配置",
@@ -327,7 +593,7 @@
         },
         "description": "分享到私聊",
         "default": [],
-        "hint": "多种格式：1. 仅QQ号 = 跟随全局 2. QQ号:类型 = 仅指定类型。类型填英文：greeting(问候), news(新闻), mood(心情), life_moment(日常), rant(吐槽), dream(梦境), recommendation(推荐)。例如: 123456 、 123456:mood,life_moment"
+        "hint": "格式同群聊，将群号替换为QQ号"
       }
     }
   },
@@ -347,10 +613,13 @@
         "hint": "random_period=在随机时段内随机触发 | cron=按Cron表达式固定时间触发"
       },
       "sharing_cron": {
-        "description": "Cron表达式(仅cron模式)",
+        "description": "Cron表达式",
         "type": "string",
         "default": "0 8,20 * * *",
-        "hint": "仅trigger_mode=cron时生效，如 0 8,20 * * * 表示每天8点和20点"
+        "hint": "仅cron模式生效，如 0 8,20 * * * 表示每天8点和20点",
+        "condition": {
+          "trigger_mode": "cron"
+        }
       },
       "cron_random_delay": {
         "description": "Cron随机延迟(分钟)",
@@ -361,7 +630,10 @@
           "max": 30,
           "step": 1
         },
-        "hint": "仅cron模式下生效。在Cron触发后随机延迟0~N分钟再执行，模拟自然行为。0=不延迟"
+        "hint": "仅cron模式生效。触发后随机延迟0~N分钟执行，模拟自然行为。0=不延迟",
+        "condition": {
+          "trigger_mode": "cron"
+        }
       },
       "sharing_type": {
         "description": "全局默认分享类型",
@@ -389,10 +661,13 @@
           "08:00-10:00",
           "19:00-21:00"
         ],
-        "hint": "仅在 random_period 模式下生效。格式：HH:MM-HH:MM。每天会在这些时间段内随机选取一个时间点分享。"
+        "hint": "仅random_period模式生效。格式：HH:MM-HH:MM",
+        "condition": {
+          "trigger_mode": "random_period"
+        }
       },
       "dawn_sequence": {
-        "description": "【序列】凌晨时段 (00:00-06:00)",
+        "description": "【序列】凌晨 (00:00-06:00)",
         "type": "list",
         "items": {
           "type": "string"
@@ -401,10 +676,13 @@
           "dream",
           "mood"
         ],
-        "hint": "候选类型：greeting(问候), news(新闻), mood(心情), life_moment(日常), rant(吐槽), dream(梦境), recommendation(推荐)。系统会根据心情和时段智能选择，无需按顺序填。"
+        "hint": "auto模式下智能选择，无需按顺序填",
+        "condition": {
+          "sharing_type": "auto"
+        }
       },
       "morning_sequence": {
-        "description": "【序列】早晨时段 (06:00-09:00)",
+        "description": "【序列】早晨 (06:00-09:00)",
         "type": "list",
         "items": {
           "type": "string"
@@ -412,10 +690,13 @@
         "default": [
           "greeting"
         ],
-        "hint": "候选类型：greeting(问候), news(新闻), mood(心情), life_moment(日常), rant(吐槽), dream(梦境), recommendation(推荐)。系统会根据心情和时段智能选择，无需按顺序填。"
+        "hint": "auto模式下智能选择，无需按顺序填",
+        "condition": {
+          "sharing_type": "auto"
+        }
       },
       "forenoon_sequence": {
-        "description": "【序列】上午时段 (09:00-12:00)",
+        "description": "【序列】上午 (09:00-12:00)",
         "type": "list",
         "items": {
           "type": "string"
@@ -424,10 +705,13 @@
           "news",
           "life_moment"
         ],
-        "hint": "候选类型：greeting(问候), news(新闻), mood(心情), life_moment(日常), rant(吐槽), dream(梦境), recommendation(推荐)。系统会根据心情和时段智能选择，无需按顺序填。"
+        "hint": "auto模式下智能选择，无需按顺序填",
+        "condition": {
+          "sharing_type": "auto"
+        }
       },
       "afternoon_sequence": {
-        "description": "【序列】下午时段 (12:00-16:00)",
+        "description": "【序列】下午 (12:00-16:00)",
         "type": "list",
         "items": {
           "type": "string"
@@ -437,10 +721,13 @@
           "life_moment",
           "rant"
         ],
-        "hint": "候选类型：greeting(问候), news(新闻), mood(心情), life_moment(日常), rant(吐槽), dream(梦境), recommendation(推荐)。系统会根据心情和时段智能选择，无需按顺序填。"
+        "hint": "auto模式下智能选择，无需按顺序填",
+        "condition": {
+          "sharing_type": "auto"
+        }
       },
       "evening_sequence": {
-        "description": "【序列】傍晚时段 (16:00-19:00)",
+        "description": "【序列】傍晚 (16:00-19:00)",
         "type": "list",
         "items": {
           "type": "string"
@@ -449,10 +736,13 @@
           "recommendation",
           "life_moment"
         ],
-        "hint": "候选类型：greeting(问候), news(新闻), mood(心情), life_moment(日常), rant(吐槽), dream(梦境), recommendation(推荐)。系统会根据心情和时段智能选择，无需按顺序填。"
+        "hint": "auto模式下智能选择，无需按顺序填",
+        "condition": {
+          "sharing_type": "auto"
+        }
       },
       "night_sequence": {
-        "description": "【序列】夜晚时段 (19:00-22:00)",
+        "description": "【序列】夜晚 (19:00-22:00)",
         "type": "list",
         "items": {
           "type": "string"
@@ -461,10 +751,13 @@
           "recommendation",
           "mood"
         ],
-        "hint": "候选类型：greeting(问候), news(新闻), mood(心情), life_moment(日常), rant(吐槽), dream(梦境), recommendation(推荐)。系统会根据心情和时段智能选择，无需按顺序填。"
+        "hint": "auto模式下智能选择，无需按顺序填",
+        "condition": {
+          "sharing_type": "auto"
+        }
       },
       "late_night_sequence": {
-        "description": "【序列】深夜时段 (22:00-24:00)",
+        "description": "【序列】深夜 (22:00-24:00)",
         "type": "list",
         "items": {
           "type": "string"
@@ -473,7 +766,10 @@
           "mood",
           "dream"
         ],
-        "hint": "候选类型：greeting(问候), news(新闻), mood(心情), life_moment(日常), rant(吐槽), dream(梦境), recommendation(推荐)。系统会根据心情和时段智能选择，无需按顺序填。"
+        "hint": "auto模式下智能选择，无需按顺序填",
+        "condition": {
+          "sharing_type": "auto"
+        }
       },
       "data_retention_days": {
         "description": "内容去重保留天数",
@@ -484,7 +780,7 @@
           "max": 365,
           "step": 1
         },
-        "hint": "用于【推荐】类型。记住最近N天内分享过的主题，避免重复分享相同的内容。同时早于此天数的日志也会被自动清理。"
+        "hint": "记住最近N天内分享过的主题避免重复，早于此天数的日志也会被清理"
       }
     }
   },
@@ -525,22 +821,28 @@
         "description": "启用生活上下文",
         "type": "bool",
         "default": true,
-        "hint": "需要安装 astrbot_plugin_life_scheduler 插件，开启后，分享内容会结合虚拟生活状态（如当前活动、地点、天气等），使分享更自然真实"
+        "hint": "需要安装 astrbot_plugin_life_scheduler 插件，分享内容会结合虚拟生活状态"
       },
       "life_context_in_group": {
         "description": "启用群聊拟人化人设",
         "type": "bool",
         "default": true,
-        "hint": "开启后，不再一味的机械播报，而是会带入生活状态与情绪，更具“人味”。"
+        "hint": "开启后群聊分享会带入生活状态与情绪，更具人味",
+        "condition": {
+          "enable_life_context": true
+        }
       },
       "group_share_schedule": {
         "description": "启用群聊展示日程细节",
         "type": "bool",
         "default": false,
-        "hint": "开启后，群聊中也会提到具体日程安排，关闭则仅显示抽象状态。"
+        "hint": "开启后群聊中也会提到具体日程安排，关闭则仅显示抽象状态",
+        "condition": {
+          "enable_life_context": true
+        }
       },
       "reference_history_count": {
-        "description": "生成时参考历史动态数",
+        "description": "参考历史动态数",
         "type": "int",
         "default": 3,
         "slider": {
@@ -548,19 +850,22 @@
           "max": 10,
           "step": 1
         },
-        "hint": "生成新动态时，参考最近N次发过的动态，保持人设连贯性并避免内容重复。设为0则不参考。"
+        "hint": "生成新动态时参考最近N次历史，保持人设连贯并避免重复。0=不参考"
       },
       "enable_chat_history": {
         "description": "启用聊天历史消息",
         "type": "bool",
         "default": true,
-        "hint": "【基础开关】开启后，读取最近的聊天历史记录，以生成更符合上下文的分享内容。"
+        "hint": "读取最近的聊天历史记录，生成更符合上下文的分享内容"
       },
       "enable_deep_history": {
         "description": "启用深度回溯",
         "type": "bool",
         "default": true,
-        "hint": "【进阶功能】需先开启上一项。开启后，尝试翻页获取更早的聊天历史消息，以便理解长跨度的上下文。"
+        "hint": "尝试翻页获取更早的聊天历史消息，理解长跨度上下文",
+        "condition": {
+          "enable_chat_history": true
+        }
       },
       "deep_history_hours": {
         "description": "深度回溯时间范围(小时)",
@@ -571,7 +876,11 @@
           "max": 168,
           "step": 1
         },
-        "hint": "读取过去N小时内的消息（群聊和私聊都受此时间限制）。"
+        "hint": "读取过去N小时内的消息",
+        "condition": {
+          "enable_chat_history": true,
+          "enable_deep_history": true
+        }
       },
       "deep_history_max_count": {
         "description": "【群聊】深度回溯最大条数",
@@ -582,7 +891,11 @@
           "max": 200,
           "step": 10
         },
-        "hint": "群聊消息量大，建议设置 50-100 条以理解上下文。"
+        "hint": "群聊消息量大，建议50-100条",
+        "condition": {
+          "enable_chat_history": true,
+          "enable_deep_history": true
+        }
       },
       "private_history_count": {
         "description": "【私聊】深度回溯最大条数",
@@ -593,7 +906,11 @@
           "max": 100,
           "step": 5
         },
-        "hint": "私聊语境较慢，建议设置 20-30 条以理解上下文。"
+        "hint": "私聊语境较慢，建议20-30条",
+        "condition": {
+          "enable_chat_history": true,
+          "enable_deep_history": true
+        }
       },
       "group_intensity_check_count": {
         "description": "群聊热度判断范围",
@@ -604,7 +921,7 @@
           "max": 100,
           "step": 5
         },
-        "hint": "查看最近多少条消息来判断热闹程度。数值越小，只要有人说话就觉得热闹（敏感）；数值越大，需要持续刷屏才觉得热闹（稳重）。"
+        "hint": "查看最近多少条消息判断热闹程度。越小越敏感，越大越稳重"
       },
       "group_share_strategy": {
         "description": "群聊分享策略",
@@ -615,13 +932,13 @@
           "active",
           "minimal"
         ],
-        "hint": "cautious=谨慎模式（群里热烈讨论时不打断）| active=主动模式（总是分享，无视群聊状态）| minimal=最小模式（只在群里冷场时分享）"
+        "hint": "cautious=热烈讨论时不打断 | active=总是分享 | minimal=只在冷场时分享"
       },
       "record_sharing_to_memory": {
         "description": "记录分享到memos会话历史",
         "type": "bool",
         "default": true,
-        "hint": "开启后，需要安装 astrbot_plugin_memos_integrator 插件才能使用，将分享内容写入对话历史，以便用户引用回复。"
+        "hint": "需要安装 astrbot_plugin_memos_integrator 插件，将分享内容写入对话历史"
       }
     }
   },
@@ -634,13 +951,16 @@
         "description": "启用新闻热搜 API",
         "type": "bool",
         "default": true,
-        "hint": "开启后，分享新闻类型时会自动获取真实热搜数据（需要配置API密钥）。关闭则使用纯LLM生成新闻内容."
+        "hint": "开启后分享新闻类型时会自动获取真实热搜数据。关闭则使用纯LLM生成"
       },
       "nycnm_api_key": {
         "description": "柠柚API密钥",
         "type": "string",
         "default": "",
-        "hint": "https://api.nycnm.cn 获取API密钥"
+        "hint": "https://api.nycnm.cn 获取API密钥",
+        "condition": {
+          "enable_news_api": true
+        }
       },
       "news_random_mode": {
         "description": "新闻热搜源模式",
@@ -652,7 +972,10 @@
           "config",
           "time_based"
         ],
-        "hint": "fixed=固定新闻热搜源 | random=每次从所有新闻热搜源中随机 | config=从随机新闻热搜源列表中随机（权重平均，会重复） | time_based=根据时间段智能选择新闻热搜源"
+        "hint": "fixed=固定源 | random=全随机 | config=从列表随机 | time_based=按时段选择",
+        "condition": {
+          "enable_news_api": true
+        }
       },
       "news_random_sources": {
         "description": "随机新闻热搜源列表",
@@ -677,14 +1000,18 @@
             "sina",
             "thepaper",
             "yicai"
-          ],
-          "hint": "新闻热搜源模式为'config'或'time_based'时生效。从此列表中随机选择新闻热搜源，增加内容多样性。推荐配置2-5个常用新闻热搜源。"
+          ]
         },
         "default": [
           "zhihu",
           "weibo",
           "bili"
-        ]
+        ],
+        "hint": "config/time_based模式生效，推荐2-5个",
+        "condition": {
+          "enable_news_api": true,
+          "news_random_mode": "config"
+        }
       },
       "news_api_source": {
         "description": "固定新闻热搜源",
@@ -709,7 +1036,11 @@
           "thepaper",
           "yicai"
         ],
-        "hint": "仅在新闻热搜源模式为 fixed 时生效。"
+        "hint": "仅fixed模式生效",
+        "condition": {
+          "enable_news_api": true,
+          "news_random_mode": "fixed"
+        }
       },
       "news_items_count": {
         "description": "获取新闻热搜条数",
@@ -720,13 +1051,19 @@
           "max": 20,
           "step": 1
         },
-        "hint": "从API获取的新闻热搜条数（1-20），推荐5-10条。获取更多可增加随机选择范围"
+        "hint": "从API获取的条数(1-20)，推荐5-10",
+        "condition": {
+          "enable_news_api": true
+        }
       },
       "news_share_count": {
         "description": "分享新闻热搜条数",
         "type": "string",
         "default": "1-2",
-        "hint": "实际分享的新闻热搜条数，可以是固定值(如'2')或范围(如：2-3)。最终会从获取新闻热搜中随机选择，避免每次都一样"
+        "hint": "可以是固定值(如2)或范围(如2-3)",
+        "condition": {
+          "enable_news_api": true
+        }
       },
       "news_api_timeout": {
         "description": "新闻热搜 API 超时(秒)",
@@ -737,13 +1074,19 @@
           "max": 60,
           "step": 1
         },
-        "hint": "获取新闻热搜的超时时间"
+        "hint": "获取新闻热搜的超时时间",
+        "condition": {
+          "enable_news_api": true
+        }
       },
       "enable_tavily_search": {
         "description": "启用 Tavily 检索分享内容",
         "type": "bool",
         "default": true,
-        "hint": "开启后，分享新闻和推荐时调用 Tavily 检索背景（需在 AstrBot AI配置中配置 Tavily），关闭则由 LLM 脑补。"
+        "hint": "分享新闻和推荐时调用Tavily检索背景（需在AstrBot AI配置中配置Tavily），关闭则LLM脑补",
+        "condition": {
+          "enable_news_api": true
+        }
       }
     }
   },
@@ -756,7 +1099,7 @@
         "description": "启用生成配图",
         "type": "bool",
         "default": false,
-        "hint": "需要安装 astrbot_plugin_aiimg 插件并配置自拍参考照才能使用。配图将始终使用自拍模式（selfie_ref），通过参考照保持人物形象一致性。"
+        "hint": "需要安装 astrbot_plugin_aiimg 插件并配置自拍参考照。配图使用自拍模式保持形象一致性"
       },
       "image_enabled_types": {
         "description": "允许配图的类型",
@@ -771,25 +1114,34 @@
           "dream",
           "recommendation"
         ],
-        "hint": "仅当分享类型在列表中时，才会生成图片。"
+        "hint": "仅当分享类型在列表中时才会生成图片",
+        "condition": {
+          "enable_ai_image": true
+        }
       },
       "attach_hot_news_image": {
         "description": "新闻热搜附带长图",
         "type": "bool",
         "default": true,
-        "hint": "开启后，如果新闻热搜类型未生成配图，则发送新闻热搜长图。"
+        "hint": "新闻类型未生成配图时，发送新闻热搜长图"
       },
       "priority_text_over_schedule": {
         "description": "文案主导构图",
         "type": "bool",
         "default": true,
-        "hint": "开启：文案说'在海边'就画海边，忽略日程表。关闭：严格遵守日程，文案说'想去海边'但日程在上班，则画办公室。"
+        "hint": "开启：文案说在海边就画海边。关闭：严格遵守日程表",
+        "condition": {
+          "enable_ai_image": true
+        }
       },
       "enable_ai_video": {
         "description": "启用生成视频",
         "type": "bool",
         "default": false,
-        "hint": "需要 astrbot_plugin_gitee_aiimg 插件配置Grok。开启后，将尝试把配图转换为视频。"
+        "hint": "需要 astrbot_plugin_gitee_aiimg 插件配置Grok，将配图转换为视频",
+        "condition": {
+          "enable_ai_image": true
+        }
       },
       "video_enabled_types": {
         "description": "允许视频的类型",
@@ -801,25 +1153,39 @@
           "greeting",
           "mood"
         ],
-        "hint": "仅当分享类型在列表中时，才会生成视频。"
+        "hint": "仅当分享类型在列表中时才会生成视频",
+        "condition": {
+          "enable_ai_image": true,
+          "enable_ai_video": true
+        }
       },
       "separate_text_and_image": {
         "description": "图文分开发送",
         "type": "bool",
         "default": true,
-        "hint": "开启后，文字和图片、视频会分两条消息发送。关闭则将文字和图片一起发送(视频无法合并，强制分开)。"
+        "hint": "开启后文字和图片/视频分两条消息发送",
+        "condition": {
+          "enable_ai_image": true
+        }
       },
       "separate_send_delay": {
         "description": "发送延迟(秒)",
         "type": "string",
         "default": "1.0-2.0",
-        "hint": "文字发送后，等待多久再发送媒体。格式: '最小值-最大值'。如：1.0-2.0"
+        "hint": "文字发送后等待多久再发送媒体。格式: 最小值-最大值",
+        "condition": {
+          "enable_ai_image": true,
+          "separate_text_and_image": true
+        }
       },
       "record_image_description": {
         "description": "记录配图描述到历史",
         "type": "bool",
         "default": true,
-        "hint": "对话历史中会包含图片的中文描述。"
+        "hint": "对话历史中会包含图片的中文描述",
+        "condition": {
+          "enable_ai_image": true
+        }
       }
     }
   },
@@ -832,7 +1198,7 @@
         "description": "启用语音转换",
         "type": "bool",
         "default": false,
-        "hint": "开启后，尝试调用TTS插件生成语音。必须先安装并配置好 astrbot_plugin_tts_emotion_router。"
+        "hint": "必须先安装并配置好 astrbot_plugin_tts_emotion_router"
       },
       "tts_enabled_types": {
         "description": "允许语音的类型",
@@ -844,13 +1210,19 @@
           "greeting",
           "mood"
         ],
-        "hint": "仅当分享类型在列表中时，才会生成语音。"
+        "hint": "仅当分享类型在列表中时才会生成语音",
+        "condition": {
+          "enable_tts": true
+        }
       },
       "prefer_audio_only": {
         "description": "仅发送语音",
         "type": "bool",
         "default": false,
-        "hint": "开启后，如果语音生成成功，将不再发送文字（仅发送语音+配图）。关闭则文字和语音都会发送。"
+        "hint": "开启后语音生成成功则不再发送文字（仅语音+配图）",
+        "condition": {
+          "enable_tts": true
+        }
       }
     }
   },
@@ -863,7 +1235,7 @@
         "description": "启用定时分享说说",
         "type": "bool",
         "default": false,
-        "hint": "开启后，将按照下方的规则和序列自动分享QQ空间说说。"
+        "hint": "开启后将按下方规则自动分享QQ空间说说"
       },
       "qzone_trigger_mode": {
         "description": "说说触发模式",
@@ -873,13 +1245,20 @@
           "random_period",
           "cron"
         ],
-        "hint": "random_period=在随机时段内随机触发 | cron=按Cron表达式固定时间触发"
+        "hint": "random_period=随机时段触发 | cron=固定时间触发",
+        "condition": {
+          "enable_qzone": true
+        }
       },
       "qzone_cron": {
-        "description": "说说Cron表达式(仅cron模式)",
+        "description": "说说Cron表达式",
         "type": "string",
         "default": "0 20 * * *",
-        "hint": "仅qzone_trigger_mode=cron时生效，如 0 20 * * * 表示每天20点"
+        "hint": "仅cron模式生效，如 0 20 * * * 表示每天20点",
+        "condition": {
+          "enable_qzone": true,
+          "qzone_trigger_mode": "cron"
+        }
       },
       "qzone_sharing_type": {
         "description": "说说分享模式",
@@ -895,7 +1274,10 @@
           "dream",
           "recommendation"
         ],
-        "hint": "auto=按心情驱动+时段序列智能选择 | 选具体类型则永远只发该类型"
+        "hint": "auto=智能选择 | 选具体类型则永远只发该类型",
+        "condition": {
+          "enable_qzone": true
+        }
       },
       "qzone_random_periods": {
         "description": "说说随机触发时间段",
@@ -907,13 +1289,20 @@
           "08:00-10:00",
           "19:00-21:00"
         ],
-        "hint": "仅在 random_period 模式下生效。格式：HH:MM-HH:MM。每天会在这些时间段内随机选取一个时间点触发分享。"
+        "hint": "仅random_period模式生效。格式：HH:MM-HH:MM",
+        "condition": {
+          "enable_qzone": true,
+          "qzone_trigger_mode": "random_period"
+        }
       },
       "qzone_enable_image": {
         "description": "启用说说生成配图",
         "type": "bool",
         "default": false,
-        "hint": "开启后，将根据说说文案生成配图。需在【🎨 配图与视频设置】中开启生成配图总开关。"
+        "hint": "需在配图设置中开启生成配图总开关",
+        "condition": {
+          "enable_qzone": true
+        }
       },
       "qzone_image_enabled_types": {
         "description": "允许说说配图的类型",
@@ -925,13 +1314,20 @@
           "greeting",
           "mood"
         ],
-        "hint": "仅当说说分享类型在列表中时，才会生成图片"
+        "hint": "仅当说说分享类型在列表中时才会生成图片",
+        "condition": {
+          "enable_qzone": true,
+          "qzone_enable_image": true
+        }
       },
       "qzone_attach_hot_news_image": {
         "description": "说说附带新闻热搜长图",
         "type": "bool",
         "default": true,
-        "hint": "开启后，如果新闻热搜类型未生成配图，则发送新闻热搜长图。"
+        "hint": "新闻类型未生成配图时发送新闻热搜长图",
+        "condition": {
+          "enable_qzone": true
+        }
       },
       "qzone_dawn_sequence": {
         "description": "【序列】凌晨 (00:00-06:00)",
@@ -943,7 +1339,11 @@
           "dream",
           "mood"
         ],
-        "hint": "候选类型：greeting(问候), news(新闻), mood(心情), life_moment(日常), rant(吐槽), dream(梦境), recommendation(推荐)。系统会根据心情和时段智能选择。"
+        "hint": "auto模式下智能选择",
+        "condition": {
+          "enable_qzone": true,
+          "qzone_sharing_type": "auto"
+        }
       },
       "qzone_morning_sequence": {
         "description": "【序列】早晨 (06:00-09:00)",
@@ -955,7 +1355,11 @@
           "mood",
           "life_moment"
         ],
-        "hint": "候选类型：greeting(问候), news(新闻), mood(心情), life_moment(日常), rant(吐槽), dream(梦境), recommendation(推荐)。系统会根据心情和时段智能选择。"
+        "hint": "auto模式下智能选择",
+        "condition": {
+          "enable_qzone": true,
+          "qzone_sharing_type": "auto"
+        }
       },
       "qzone_forenoon_sequence": {
         "description": "【序列】上午 (09:00-12:00)",
@@ -967,7 +1371,11 @@
           "life_moment",
           "rant"
         ],
-        "hint": "候选类型：greeting(问候), news(新闻), mood(心情), life_moment(日常), rant(吐槽), dream(梦境), recommendation(推荐)。系统会根据心情和时段智能选择。"
+        "hint": "auto模式下智能选择",
+        "condition": {
+          "enable_qzone": true,
+          "qzone_sharing_type": "auto"
+        }
       },
       "qzone_afternoon_sequence": {
         "description": "【序列】下午 (12:00-16:00)",
@@ -979,7 +1387,11 @@
           "life_moment",
           "rant"
         ],
-        "hint": "候选类型：greeting(问候), news(新闻), mood(心情), life_moment(日常), rant(吐槽), dream(梦境), recommendation(推荐)。系统会根据心情和时段智能选择。"
+        "hint": "auto模式下智能选择",
+        "condition": {
+          "enable_qzone": true,
+          "qzone_sharing_type": "auto"
+        }
       },
       "qzone_evening_sequence": {
         "description": "【序列】傍晚 (16:00-19:00)",
@@ -991,7 +1403,11 @@
           "life_moment",
           "recommendation"
         ],
-        "hint": "候选类型：greeting(问候), news(新闻), mood(心情), life_moment(日常), rant(吐槽), dream(梦境), recommendation(推荐)。系统会根据心情和时段智能选择。"
+        "hint": "auto模式下智能选择",
+        "condition": {
+          "enable_qzone": true,
+          "qzone_sharing_type": "auto"
+        }
       },
       "qzone_night_sequence": {
         "description": "【序列】夜晚 (19:00-22:00)",
@@ -1003,7 +1419,11 @@
           "mood",
           "recommendation"
         ],
-        "hint": "候选类型：greeting(问候), news(新闻), mood(心情), life_moment(日常), rant(吐槽), dream(梦境), recommendation(推荐)。系统会根据心情和时段智能选择。"
+        "hint": "auto模式下智能选择",
+        "condition": {
+          "enable_qzone": true,
+          "qzone_sharing_type": "auto"
+        }
       },
       "qzone_late_night_sequence": {
         "description": "【序列】深夜 (22:00-24:00)",
@@ -1015,7 +1435,11 @@
           "mood",
           "dream"
         ],
-        "hint": "候选类型：greeting(问候), news(新闻), mood(心情), life_moment(日常), rant(吐槽), dream(梦境), recommendation(推荐)。系统会根据心情和时段智能选择。"
+        "hint": "auto模式下智能选择",
+        "condition": {
+          "enable_qzone": true,
+          "qzone_sharing_type": "auto"
+        }
       }
     }
   },
@@ -1031,7 +1455,7 @@
           "type": "string"
         },
         "default": [],
-        "hint": "填入接收早报的群号。留空则不分享。"
+        "hint": "填入接收早报的群号。留空则不分享"
       },
       "briefing_users": {
         "description": "早报分享私聊",
@@ -1040,31 +1464,31 @@
           "type": "string"
         },
         "default": [],
-        "hint": "填入接收早报的QQ号。留空则不分享。"
+        "hint": "填入接收早报的QQ号。留空则不分享"
       },
       "cron_briefing": {
         "description": "定时分享时间",
         "type": "string",
         "default": "0 8 * * *",
-        "hint": "Cron表达式，默认每天08:00。"
+        "hint": "Cron表达式，默认每天08:00"
       },
       "enable_60s_news": {
         "description": "启用分享每天60s读世界",
         "type": "bool",
         "default": false,
-        "hint": "开启后，定时触发的每天60s读世界自动分享到群聊、私聊。"
+        "hint": "定时触发的每天60s读世界自动分享到群聊、私聊"
       },
       "enable_ai_news": {
         "description": "启用分享AI资讯快报",
         "type": "bool",
         "default": false,
-        "hint": "开启后，定时触发的AI资讯快报自动分享到群聊、私聊。"
+        "hint": "定时触发的AI资讯快报自动分享到群聊、私聊"
       },
       "sync_briefing_to_qzone": {
         "description": "启用分享早报到QQ空间",
         "type": "bool",
         "default": false,
-        "hint": "开启后，定时触发的每天60s读世界和AI资讯快报也会自动作为说说分享到QQ空间。"
+        "hint": "每天60s读世界和AI资讯快报也会作为说说分享到QQ空间"
       }
     }
   },
@@ -1077,7 +1501,7 @@
         "description": "LLM提供商",
         "type": "string",
         "default": "",
-        "hint": "使用LLM生成内容，不选择或者指定LLM失败后自动降级使用默认的第一个模型",
+        "hint": "不选择或指定LLM失败后自动降级使用默认模型",
         "_special": "select_provider"
       },
       "llm_timeout": {
@@ -1095,7 +1519,7 @@
         "description": "融合人设特征",
         "type": "bool",
         "default": true,
-        "hint": "开启后，分享内容会使用系统人设语气和性格，更加生动自然"
+        "hint": "开启后分享内容会使用系统人设语气和性格，更加生动自然"
       },
       "persona_id": {
         "description": "指定人设ID",
