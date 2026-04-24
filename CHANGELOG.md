@@ -1,3 +1,9 @@
+### v5.5.3
+**🐛 修复跨插件硬依赖导致加载失败**
+
+*   移除对 `astrbot_plugin_daymind` 的硬依赖，将 `PersonaConfigMixin` 内联到本插件
+*   修复云服务器未安装 daymind 插件时 `ModuleNotFoundError: No module named 'astrbot_plugin_daymind'` 导致插件无法加载
+
 ### v5.5.2
 **🐛 多人格模式深度Bug修复 + 死代码清理**
 
