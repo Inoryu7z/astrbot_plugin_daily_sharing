@@ -6,9 +6,10 @@ from astrbot.api import logger
 from ..config import NEWS_SOURCE_MAP, NEWS_TIME_PREFERENCES, TimePeriod
 
 class NewsService:
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, plugin=None):
         self.config = config
         self.conf = self.config.get("news_conf", {})
+        self.plugin = plugin
 
     def _get_current_period(self) -> TimePeriod:
         from datetime import datetime
@@ -24,7 +25,7 @@ class NewsService:
     def select_news_source(self, excluded_source: str = None, persona_name: str = None) -> str:
         mode = self.conf.get("news_random_mode", "config")
 
-        if persona_name:
+        if persona_name and self.plugin:
             try:
                 persona_mode = self.plugin.get_persona_config_value(persona_name, "persona_news_conf", "news_random_mode", None)
                 if persona_mode:
@@ -34,7 +35,7 @@ class NewsService:
         
         if mode == "fixed": 
             source = self.conf.get("news_api_source", "zhihu")
-            if persona_name:
+            if persona_name and self.plugin:
                 try:
                     persona_source = self.plugin.get_persona_config_value(persona_name, "persona_news_conf", "news_api_source", None)
                     if persona_source:
@@ -52,7 +53,7 @@ class NewsService:
             return source
         elif mode == "config":
             c = self.conf.get("news_random_sources", ["zhihu", "weibo"])
-            if persona_name:
+            if persona_name and self.plugin:
                 try:
                     persona_sources = self.plugin.get_persona_config_value(persona_name, "persona_news_conf", "news_random_sources", None)
                     if persona_sources:

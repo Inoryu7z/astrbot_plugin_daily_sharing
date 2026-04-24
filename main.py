@@ -44,7 +44,7 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
         
         # 锁与防抖
         self._lock = asyncio.Lock()
-        self._last_share_time = None
+        self._last_share_time = {}
         
         # 生命周期标志位 
         self._is_terminated = False
@@ -72,7 +72,7 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
         
         # 初始化服务层
         self.ctx_service = ContextService(context, config)
-        self.news_service = NewsService(config)
+        self.news_service = NewsService(config, self)
         self.image_service = ImageService(context, config, self._call_llm_wrapper)
         
         # 初始化内容服务
@@ -81,7 +81,8 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
             self._call_llm_wrapper, 
             context,
             self.db, 
-            self.news_service
+            self.news_service,
+            self
         )
         
         # 核心逻辑解耦器

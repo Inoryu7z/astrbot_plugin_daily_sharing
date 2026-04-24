@@ -12,7 +12,7 @@ from astrbot.api import logger
 from ..config import SharingType, TimePeriod, DEFAULT_REC_CATS, NEWS_SOURCE_MAP
 
 class ContentService:
-    def __init__(self, config: Dict, llm_func, context, db_manager, news_service=None):
+    def __init__(self, config: Dict, llm_func, context, db_manager, news_service=None, plugin=None):
         """
         初始化内容生成服务
         """
@@ -21,6 +21,7 @@ class ContentService:
         self.context = context 
         self.db = db_manager 
         self.news_service = news_service
+        self.plugin = plugin
         
         self.content_lib_conf = self.config.get("content_library", {})
         raw_rec = self.content_lib_conf.get("rec_cats", DEFAULT_REC_CATS)
@@ -196,37 +197,42 @@ class ContentService:
         info = {"prompt": "", "bot_name": "", "user_name": ""}
         try:
             persona_id = ""
-            if persona_name:
+            if persona_name and self.plugin:
                 persona_id = self.plugin.get_persona_config_value(persona_name, "persona_llm_conf", "persona_id", "")
             if not persona_id:
                 persona_id = self.llm_conf.get("persona_id", "")
 
+            persona_mgr = getattr(self.context, "persona_manager", None)
+
             if persona_name and not persona_id:
-                try:
-                    persona_mgr = getattr(self.context, "persona_manager", None)
-                    if persona_mgr:
+                if persona_mgr:
+                    try:
                         persona_obj = await persona_mgr.get_persona(persona_name)
                         if persona_obj:
                             info["prompt"] = getattr(persona_obj, "system_prompt", "")
                             info["bot_name"] = getattr(persona_obj, "bot_name", "")
                             info["user_name"] = getattr(persona_obj, "user_name", "")
                             return info
+                    except Exception:
+                        pass
+
+            if persona_id and persona_mgr:
+                try:
+                    persona = await persona_mgr.get_persona(persona_id)
+                    if persona:
+                        info["prompt"] = getattr(persona, "system_prompt", "")
+                        info["bot_name"] = getattr(persona, "bot_name", "")
+                        info["user_name"] = getattr(persona, "user_name", "")
+                        return info
                 except Exception:
                     pass
 
-            if persona_id:
-                persona = await self.context.persona_manager.get_persona(persona_id)
-                if persona:
-                    info["prompt"] = getattr(persona, "system_prompt", "")
-                    info["bot_name"] = getattr(persona, "bot_name", "")
-                    info["user_name"] = getattr(persona, "user_name", "")
-                    return info
-
-            personality = await self.context.persona_manager.get_default_persona_v3()
-            if personality:
-                info["prompt"] = personality.get("prompt", "")
-                info["bot_name"] = personality.get("bot_name", "")
-                info["user_name"] = personality.get("user_name", "")
+            if persona_mgr and hasattr(persona_mgr, "get_default_persona_v3"):
+                personality = await persona_mgr.get_default_persona_v3()
+                if personality:
+                    info["prompt"] = personality.get("prompt", "") if isinstance(personality, dict) else getattr(personality, "system_prompt", "")
+                    info["bot_name"] = personality.get("bot_name", "") if isinstance(personality, dict) else getattr(personality, "bot_name", "")
+                    info["user_name"] = personality.get("user_name", "") if isinstance(personality, dict) else getattr(personality, "user_name", "")
             return info
         except Exception as e:
             logger.error(f"[内容服务] 获取人设失败: {e}")

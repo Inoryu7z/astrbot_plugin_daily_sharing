@@ -75,7 +75,7 @@ class CommandHandler:
                 custom_cron = conf.get("cron") or "无"
                 target_specific_type = conf.get("seq", "auto")
 
-        is_custom_seq = target_specific_type != "auto" and target_specific_type != "auto"
+        is_custom_seq = target_specific_type != "auto"
         idx_display = state.get('custom_sequence_index', 0) if is_custom_seq else state.get('sequence_index', 0)
 
         personas = self.plugin.get_enabled_personas()

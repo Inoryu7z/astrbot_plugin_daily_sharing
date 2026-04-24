@@ -1,3 +1,14 @@
+### v5.5.1
+**🐛 多人格模式关键Bug修复**
+
+*   修复 `ContentService` 和 `NewsService` 缺少 `plugin` 引用导致多人格模式下 `AttributeError` 崩溃
+*   修复 `persona_manager` 无空值检查，框架未初始化时崩溃
+*   修复 `_get_persona_info` 解析链脆弱，增加空值守卫和类型兼容
+*   修复 `_last_share_time` 跨人格共享导致防抖误跳过
+*   修复 `async_daily_share_task`（LLM工具触发）不解析当前会话人格
+*   修复 `commands.py` 冗余条件判断
+*   补充 `_conf_schema.json` 中 `persona_basic_conf` 缺失的 `trigger_mode` 和 `sharing_cron` 配置字段
+
 ### v5.5.0
 **🎭 多人格全面支持：每个人格独立配置、独立调度、独立内容生成**
 

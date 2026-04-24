@@ -54,6 +54,19 @@
             "type": "object",
             "hint": "该人格的独立基础设置，留空回退全局",
             "items": {
+              "trigger_mode": {
+                "description": "触发模式",
+                "type": "string",
+                "default": "",
+                "options": ["", "random_period", "cron"],
+                "hint": "留空回退全局。random_period=随机时段，cron=固定时间"
+              },
+              "sharing_cron": {
+                "description": "Cron表达式(仅cron模式)",
+                "type": "string",
+                "default": "",
+                "hint": "仅trigger_mode=cron时生效，如 0 8,20 * * *。留空回退全局"
+              },
               "sharing_type": {
                 "description": "分享类型策略",
                 "type": "string",

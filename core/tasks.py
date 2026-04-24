@@ -348,15 +348,17 @@ class TaskManager:
                 state_key = f"global_{persona_name}" if persona_name else "global"
                 await self.db.update_state_dict(state_key, {"pending_delay_job": None})
                 now = datetime.now()
-                if self.plugin._last_share_time:
-                    if (now - self.plugin._last_share_time).total_seconds() < 60:
-                        logger.debug("[DailySharing] 检测到近期已执行任务，跳过本次触发。")
+                debounce_key = persona_name or "_default"
+                last_time = self.plugin._last_share_time.get(debounce_key)
+                if last_time:
+                    if (now - last_time).total_seconds() < 60:
+                        logger.debug(f"[DailySharing] 检测到近期已执行任务{'[人格: '+persona_name+']' if persona_name else ''}，跳过本次触发。")
                         return
                 if self._lock.locked():
                     logger.warning("[DailySharing] 上一个任务正在进行中，跳过本次触发。")
                     return
                 async with self._lock:
-                    self.plugin._last_share_time = now
+                    self.plugin._last_share_time[debounce_key] = now
                     logger.info(f"[DailySharing] 开始执行分享任务{' [人格: '+persona_name+']' if persona_name else ''}...")
                     await self.execute_share(persona_name=persona_name)
             finally:
@@ -1046,6 +1048,8 @@ class TaskManager:
     ):
         """实际执行分享逻辑的后台任务 (LLM 触发)"""
         try:
+            persona_name = await self.plugin.resolve_persona_from_event(event)
+            
             # 特殊图片类型处理 (60s / AI) 
             st_clean = share_type.lower().replace(" ", "")
             
@@ -1146,7 +1150,7 @@ class TaskManager:
                         img_url, src_name = self.news_service.get_hot_news_image_url(news_src_key)
                     else:
                         # 如果没有指定，则随机选择一个已启用的新闻源发送
-                        random_src = self.news_service.select_news_source()
+                        random_src = self.news_service.select_news_source(persona_name=persona_name)
                         img_url, src_name = self.news_service.get_hot_news_image_url(random_src)
 
                     if img_url:
@@ -1190,7 +1194,7 @@ class TaskManager:
             period = self.get_curr_period()
             
             # 准备数据
-            life_ctx = await self.ctx_service.get_life_context()
+            life_ctx = await self.ctx_service.get_life_context(persona_name=persona_name)
             news_data = None
             
             # 初始化 img_path (可能用于存放热搜截图)
@@ -1199,7 +1203,7 @@ class TaskManager:
             if target_type_enum == SharingType.NEWS:
                 # 这里的 news_src_key 如果是 None 会自动选择
                 if not news_src_key:
-                    news_src_key = self.news_service.select_news_source()
+                    news_src_key = self.news_service.select_news_source(persona_name=persona_name)
                 news_data = await self.news_service.get_hot_news(news_src_key)
                 
                 # 如果在主流程中且配置允许带上新闻图
@@ -1235,7 +1239,7 @@ class TaskManager:
 
             # 生成内容
             content = await self.content_service.generate(
-                target_type_enum, period, target_umo, is_group, life_prompt, hist_prompt, news_data, nickname=nickname, recent_dynamics=recent_dynamics_str
+                target_type_enum, period, target_umo, is_group, life_prompt, hist_prompt, news_data, nickname=nickname, recent_dynamics=recent_dynamics_str, persona_name=persona_name
             )
             
             if not content:
