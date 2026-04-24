@@ -1,3 +1,11 @@
+### v5.5.5
+**🐛 修复 DailySharing 自拍图不存入 Wardrobe 衣橱**
+
+*   修复 `_call_aiimg_selfie()` 直接调用 `aiimg.edit.edit()` 生成自拍图后，未触发 Wardrobe 自动存图的问题
+*   新增 `_get_wardrobe_instance()` 方法查找衣橱插件实例
+*   新增 `_auto_save_to_wardrobe()` 方法，在自拍图生成后直接调用 `wardrobe._save_image_from_bytes()` 存图入库
+*   存图 `created_by` 固定为 `"dailysharing"`，`persona` 使用当前人格名
+
 ### v5.5.4
 **🐛 多人格配置Bug修复 + 配置界面补全**
 

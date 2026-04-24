@@ -13,6 +13,8 @@ class ImageService:
         self.call_llm = llm_func
         self._aiimg_plugin = None
         self._aiimg_plugin_not_found = False
+        self._wardrobe_plugin = None
+        self._wardrobe_plugin_not_found = False
         self._last_image_description = None
 
         self.img_conf = self.config.get("image_conf", {})
@@ -50,6 +52,23 @@ class ImageService:
 
             if not self._aiimg_plugin:
                 self._aiimg_plugin_not_found = True
+
+    def _get_wardrobe_instance(self):
+        if not self._wardrobe_plugin and not self._wardrobe_plugin_not_found:
+            for p in self.context.get_all_stars():
+                if p.name == "astrbot_plugin_wardrobe":
+                    if hasattr(p, "star_instance") and p.star_instance:
+                        self._wardrobe_plugin = p.star_instance
+                    elif hasattr(p, "instance") and p.instance:
+                        self._wardrobe_plugin = p.instance
+                    else:
+                        self._wardrobe_plugin = getattr(p, "star_cls", None)
+                    if self._wardrobe_plugin:
+                        logger.info("[DailySharing] 已找到衣橱插件: astrbot_plugin_wardrobe")
+                    break
+            if not self._wardrobe_plugin:
+                self._wardrobe_plugin_not_found = True
+        return self._wardrobe_plugin
 
     # ==================== 1. 核心逻辑：Agent 提取 ====================
 
@@ -423,8 +442,39 @@ class ImageService:
                 size=size,
                 chain_override=chain_override,
             )
+
+            await self._auto_save_to_wardrobe(path_obj, resolved_persona)
+
             return str(path_obj)
 
         except Exception as e:
             logger.error(f"[DailySharing] 自拍生成出错: {e}")
             return None
+
+    async def _auto_save_to_wardrobe(self, image_path, persona_name: str = ""):
+        wardrobe = self._get_wardrobe_instance()
+        if not wardrobe or not hasattr(wardrobe, "_save_image_from_bytes"):
+            return
+        try:
+            from pathlib import Path as _Path
+            p = _Path(image_path)
+            if not p.exists():
+                logger.debug("[DailySharing] 自动存图跳过：图片文件不存在 %s", image_path)
+                return
+            import aiofiles
+            async with aiofiles.open(p, "rb") as f:
+                image_bytes = await f.read()
+            if not image_bytes:
+                return
+            logger.info("[DailySharing] 自动存图到衣橱，图片大小=%.2fKB 人格=%s", len(image_bytes) / 1024, persona_name or "无")
+            image_id, attrs, duplicate = await wardrobe._save_image_from_bytes(
+                image_bytes,
+                persona=persona_name,
+                created_by="dailysharing",
+            )
+            if duplicate:
+                logger.debug("[DailySharing] 自动存图跳过：图片重复 (hash已存在)")
+            elif image_id:
+                logger.info("[DailySharing] 自动存图成功，ID=%s", image_id)
+        except Exception as e:
+            logger.debug("[DailySharing] 自动存图到衣橱失败: %s", e)
