@@ -180,6 +180,19 @@
                 "default": "",
                 "hint": "留空回退全局，true/false"
               },
+              "qzone_trigger_mode": {
+                "description": "说说触发模式",
+                "type": "string",
+                "default": "",
+                "options": ["", "random_period", "cron"],
+                "hint": "留空回退全局。random_period=随机时段，cron=固定时间"
+              },
+              "qzone_cron": {
+                "description": "说说Cron表达式(仅cron模式)",
+                "type": "string",
+                "default": "",
+                "hint": "仅qzone_trigger_mode=cron时生效。留空回退全局"
+              },
               "qzone_sharing_type": {
                 "description": "说说分享模式",
                 "type": "string",
@@ -216,6 +229,12 @@
             "items": {
               "enable_life_context": {
                 "description": "启用生活上下文",
+                "type": "string",
+                "default": "",
+                "hint": "留空回退全局，true/false"
+              },
+              "life_context_in_group": {
+                "description": "启用群聊拟人化人设",
                 "type": "string",
                 "default": "",
                 "hint": "留空回退全局，true/false"
@@ -315,8 +334,35 @@
   "basic_conf": {
     "description": "⏰ 基础设置",
     "type": "object",
-    "hint": "设置分享类型策略和随机时间段。",
+    "hint": "设置分享类型策略、触发模式和随机时间段。",
     "items": {
+      "trigger_mode": {
+        "description": "触发模式",
+        "type": "string",
+        "default": "random_period",
+        "options": [
+          "random_period",
+          "cron"
+        ],
+        "hint": "random_period=在随机时段内随机触发 | cron=按Cron表达式固定时间触发"
+      },
+      "sharing_cron": {
+        "description": "Cron表达式(仅cron模式)",
+        "type": "string",
+        "default": "0 8,20 * * *",
+        "hint": "仅trigger_mode=cron时生效，如 0 8,20 * * * 表示每天8点和20点"
+      },
+      "cron_random_delay": {
+        "description": "Cron随机延迟(分钟)",
+        "type": "int",
+        "default": 0,
+        "slider": {
+          "min": 0,
+          "max": 30,
+          "step": 1
+        },
+        "hint": "仅cron模式下生效。在Cron触发后随机延迟0~N分钟再执行，模拟自然行为。0=不延迟"
+      },
       "sharing_type": {
         "description": "全局默认分享类型",
         "type": "string",
@@ -818,6 +864,22 @@
         "type": "bool",
         "default": false,
         "hint": "开启后，将按照下方的规则和序列自动分享QQ空间说说。"
+      },
+      "qzone_trigger_mode": {
+        "description": "说说触发模式",
+        "type": "string",
+        "default": "random_period",
+        "options": [
+          "random_period",
+          "cron"
+        ],
+        "hint": "random_period=在随机时段内随机触发 | cron=按Cron表达式固定时间触发"
+      },
+      "qzone_cron": {
+        "description": "说说Cron表达式(仅cron模式)",
+        "type": "string",
+        "default": "0 20 * * *",
+        "hint": "仅qzone_trigger_mode=cron时生效，如 0 20 * * * 表示每天20点"
       },
       "qzone_sharing_type": {
         "description": "说说分享模式",

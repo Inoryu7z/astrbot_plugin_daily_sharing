@@ -44,10 +44,16 @@ class TaskManager:
                 self._setup_persona_tasks(canonical, persona_entry)
         else:
             if self.plugin.config.get("enable_auto_sharing", False):
-                cron = self.basic_conf.get("sharing_cron", "0 8,20 * * *")
-                self.setup_cron(cron, persona_name=None)
+                trigger_mode = self.basic_conf.get("trigger_mode", "random_period")
+                if trigger_mode == "cron":
+                    cron = self.basic_conf.get("sharing_cron", "0 8,20 * * *")
+                    self.setup_cron(cron, persona_name=None)
+                else:
+                    daily_sched_id = "daily_random_scheduler"
+                    self._setup_cron_job_custom(daily_sched_id, "0 0 * * *", self._make_persona_daily_random_scheduler(None))
+                    asyncio.create_task(self._make_persona_daily_random_scheduler(None)())
                 self.setup_custom_target_crons(persona_name=None)
-                logger.debug(f"[DailySharing] 单人格模式：分享内容定时任务已启动 ({cron})")
+                logger.debug(f"[DailySharing] 单人格模式：分享内容定时任务已启动 (模式: {trigger_mode})")
 
         enable_60s = self.extra_shares_conf.get("enable_60s_news", False)
         enable_ai = self.extra_shares_conf.get("enable_ai_news", False)
@@ -998,7 +1004,7 @@ class TaskManager:
             hist_data = await self.ctx_service.get_history_data(target_umo, is_group)
             hist_prompt = self.ctx_service.format_history_prompt(hist_data, target_type_enum)
             group_info = hist_data.get("group_info")
-            life_prompt = self.ctx_service.format_life_context(life_ctx, target_type_enum, is_group, group_info)
+            life_prompt = self.ctx_service.format_life_context(life_ctx, target_type_enum, is_group, group_info, persona_name=persona_name)
             
             # 获取近期动态记忆
             recent_dynamics_str = ""
@@ -1224,7 +1230,7 @@ class TaskManager:
 
                 hist_prompt = self.ctx_service.format_history_prompt(hist_data, stype)
                 group_info = hist_data.get("group_info")
-                life_prompt = self.ctx_service.format_life_context(life_ctx, stype, is_group, group_info)
+                life_prompt = self.ctx_service.format_life_context(life_ctx, stype, is_group, group_info, persona_name=persona_name)
 
                 recent_dynamics_str = ""
                 ref_count = self.plugin.get_persona_config_value(persona_name, "persona_context_conf", "reference_history_count", None) or self.context_conf.get("reference_history_count", 3)
@@ -1353,7 +1359,7 @@ class TaskManager:
                 news_data = await self.news_service.get_hot_news(actual_source)
 
             # 屏蔽历史记录，使用纯净的提示词让LLM写说说
-            qzone_life_prompt = self.ctx_service.format_life_context(life_ctx, stype, False, None)
+            qzone_life_prompt = self.ctx_service.format_life_context(life_ctx, stype, False, None, persona_name=persona_name)
             qzone_life_prompt += (
                 "\n\n【最高优先级覆盖指令】\n"
                 "这是一条个人QQ空间社交平台的动态说说\n"

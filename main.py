@@ -101,13 +101,18 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
         entries = self._persona_entries()
         return [e for e in entries if e.get("enabled", True)]
 
-    def get_persona_config_value(self, persona_name: str, conf_key: str, sub_key: str, default=None):
+    def get_persona_config_value(self, persona_name: str, conf_key: str, sub_key: str, default=None, int_fallback_sentinel=None):
         item = self._find_persona_config(persona_name)
         if item is not None:
             persona_conf = item.get(conf_key, {})
             if isinstance(persona_conf, dict) and sub_key in persona_conf:
                 val = persona_conf[sub_key]
-                if val is not None and val != "" and val != [] and val != -1:
+                is_unset = (val is None or val == "" or val == [])
+                if int_fallback_sentinel is not None and isinstance(val, int) and val == int_fallback_sentinel:
+                    is_unset = True
+                elif val == -1:
+                    is_unset = True
+                if not is_unset:
                     if isinstance(val, str) and val.lower() in ("true", "false"):
                         return val.lower() == "true"
                     return val
@@ -255,12 +260,11 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
         except Exception as e:
             logger.error(f"[DailySharing] 保存配置失败: {e}")
 
-    async def _call_llm_wrapper(self, prompt: str, system_prompt: str = None, timeout: int = 60, max_retries: int = 2, tools: list = None) -> Optional[str]:
+    async def _call_llm_wrapper(self, prompt: str, system_prompt: str = None, timeout: int = 60, max_retries: int = 2, tools: list = None, persona_name: str = None) -> Optional[str]:
         """LLM 调用包装器（支持失败重试与自动降级）"""
         if self._is_terminated: return None
         
         def _get_system_default_provider() -> str:
-            # 如果没指定，默认使用第一个模型
             try:
                 cfg = self.context.get_config()
                 if cfg:
@@ -273,15 +277,19 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
                 pass
             return ""
 
-        user_provider_id = self.llm_conf.get("llm_provider_id", "")
+        if persona_name:
+            user_provider_id = self.get_persona_config_value(persona_name, "persona_llm_conf", "llm_provider_id", "")
+            persona_timeout = self.get_persona_config_value(persona_name, "persona_llm_conf", "llm_timeout", None, int_fallback_sentinel=0)
+            config_timeout = persona_timeout if persona_timeout is not None else self.llm_conf.get("llm_timeout", 60)
+        else:
+            user_provider_id = self.llm_conf.get("llm_provider_id", "")
+            config_timeout = self.llm_conf.get("llm_timeout", 60)
 
-        # 如果存在临时降级缓存，说明指定的模型已经坏了，直接跳过它        
         if self._temp_fallback_provider:
             user_provider_id = self._temp_fallback_provider
-            
+
         current_provider_id = user_provider_id if user_provider_id else _get_system_default_provider()
 
-        config_timeout = self.llm_conf.get("llm_timeout", 60)
         actual_timeout = max(timeout, config_timeout)
 
         for attempt in range(max_retries + 1):

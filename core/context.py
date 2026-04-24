@@ -370,18 +370,23 @@ class ContextService:
             logger.error(f"[上下文] 解析生活数据失败: {e}")
             return str(data)
 
-    def format_life_context(self, context: str, sharing_type: SharingType, is_group: bool, group_info: dict = None) -> str:
+    def format_life_context(self, context: str, sharing_type: SharingType, is_group: bool, group_info: dict = None, persona_name: str = None) -> str:
         """格式化生活上下文"""
         if not context: return ""
         
         if is_group:
-            return self._format_life_context_for_group(context, sharing_type, group_info)
+            return self._format_life_context_for_group(context, sharing_type, group_info, persona_name=persona_name)
         else:
             return self._format_life_context_for_private(context, sharing_type)
 
-    def _format_life_context_for_group(self, context: str, sharing_type: SharingType, group_info: dict = None) -> str:
+    def _format_life_context_for_group(self, context: str, sharing_type: SharingType, group_info: dict = None, persona_name: str = None) -> str:
         """格式化群聊生活上下文"""
-        if not self.life_conf.get("life_context_in_group", True): return ""
+        if persona_name:
+            val = self.plugin.get_persona_config_value(persona_name, "persona_context_conf", "life_context_in_group", None)
+            life_in_group = val if val is not None else self.life_conf.get("life_context_in_group", True)
+        else:
+            life_in_group = self.life_conf.get("life_context_in_group", True)
+        if not life_in_group: return ""
         
         # 如果是心情分享，且群聊热度高，则不带生活状态
         if sharing_type == SharingType.MOOD and group_info and group_info.get("chat_intensity") == "high":

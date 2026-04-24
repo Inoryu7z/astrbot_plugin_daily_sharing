@@ -53,7 +53,7 @@ class ImageService:
 
     # ==================== 1. 核心逻辑：Agent 提取 ====================
 
-    async def _agent_extract_visuals(self, content: str, life_context: str) -> Dict[str, str]:
+    async def _agent_extract_visuals(self, content: str, life_context: str, persona_name: str = None) -> Dict[str, str]:
         if not content and not life_context: return {}
 
         now = datetime.now()
@@ -119,7 +119,7 @@ class ImageService:
             logger.info(f"[DailySharing] 【DEBUG】User Prompt: {user_prompt}")
 
         try:
-            res = await self.call_llm(user_prompt, system_prompt, timeout=45)
+            res = await self.call_llm(user_prompt, system_prompt, timeout=45, persona_name=persona_name)
 
             if self.debug_mode:
                 logger.info(f"[DailySharing] 【DEBUG】Agent 原始回复: {res}")
@@ -177,7 +177,7 @@ class ImageService:
 
         visuals = {}
         if content or life_context:
-            visuals = await self._agent_extract_visuals(content, life_context)
+            visuals = await self._agent_extract_visuals(content, life_context, persona_name=persona_name)
 
             if not visuals:
                 logger.warning("[DailySharing] Agent 提取失败，已取消配图，仅发送文案")

@@ -29,7 +29,7 @@ class ContentService:
         self.rec_cats = self._parse_str_list_to_dict(raw_rec)
         
         self.basic_conf = self.config.get("basic_conf", {})
-        self.dedup_days = int(self.basic_conf.get("dedup_days_limit", 60))
+        self.dedup_days = int(self.basic_conf.get("data_retention_days", 60))
         
         self.news_conf = self.config.get("news_conf", {})
         self.llm_conf = self.config.get("llm_conf", {})
@@ -172,7 +172,7 @@ class ContentService:
 {constraint}
 """
 
-        res = await self.call_llm(prompt=user_prompt, system_prompt=system_prompt, timeout=15)
+        res = await self.call_llm(prompt=user_prompt, system_prompt=system_prompt, timeout=15, persona_name=None)
         if not res: return None
         
         # 清洗结果 (去除标点和多余空格)
@@ -353,7 +353,7 @@ class ContentService:
 
 请生成{p_label}问候："""
 
-        res = await self.call_llm(prompt=prompt, system_prompt=ctx['persona'])
+        res = await self.call_llm(prompt=prompt, system_prompt=ctx['persona'], persona_name=ctx.get('persona_name'))
         if res:
             return f"{res}"
         return None  
@@ -455,7 +455,7 @@ class ContentService:
 
 你的随想："""
         
-        return await self.call_llm(prompt=prompt, system_prompt=ctx['persona'])
+        return await self.call_llm(prompt=prompt, system_prompt=ctx['persona'], persona_name=ctx.get('persona_name'))
 
     async def _fetch_search_tavily(self, keyword: str, search_type: str = "news") -> Tuple[str, str]:
         """调用 AstrBot 内置的 Tavily 进行搜索"""
@@ -665,7 +665,7 @@ class ContentService:
 
 直接输出："""
 
-        res = await self.call_llm(prompt=prompt, system_prompt=ctx['persona'], timeout=60)
+        res = await self.call_llm(prompt=prompt, system_prompt=ctx['persona'], timeout=60, persona_name=ctx.get('persona_name'))
         
         if res:
             return f"{res}"
@@ -929,7 +929,7 @@ class ContentService:
 
 你的梦境分享："""
 
-        return await self.call_llm(prompt=prompt, system_prompt=ctx['persona'])
+        return await self.call_llm(prompt=prompt, system_prompt=ctx['persona'], persona_name=ctx.get('persona_name'))
 
     # ==================== 日常碎片 & 吐槽 ====================
 
@@ -1023,7 +1023,7 @@ class ContentService:
 
 你的日常碎片："""
 
-        return await self.call_llm(prompt=prompt, system_prompt=ctx['persona'])
+        return await self.call_llm(prompt=prompt, system_prompt=ctx['persona'], persona_name=ctx.get('persona_name'))
 
     async def _gen_rant(self, period: TimePeriod, ctx: dict):
         is_group = ctx['is_group']
@@ -1103,7 +1103,7 @@ class ContentService:
 
 你的吐槽："""
 
-        return await self.call_llm(prompt=prompt, system_prompt=ctx['persona'])
+        return await self.call_llm(prompt=prompt, system_prompt=ctx['persona'], persona_name=ctx.get('persona_name'))
 
     async def _gen_rec(self, ctx: dict):
         """生成推荐，API 失败则使用 LLM 兜底"""
@@ -1229,7 +1229,7 @@ class ContentService:
 7. 直接输出推荐内容。
 """
 
-        res = await self.call_llm(prompt=prompt, system_prompt=ctx['persona'])
+        res = await self.call_llm(prompt=prompt, system_prompt=ctx['persona'], persona_name=ctx.get('persona_name'))
         
         if res:
             try:

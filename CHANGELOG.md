@@ -1,3 +1,17 @@
+### v5.5.4
+**🐛 多人格配置Bug修复 + 配置界面补全**
+
+*   修复 `content.py` 读取 `dedup_days_limit` 键名与 schema 中 `data_retention_days` 不匹配，去重天数始终使用默认值60
+*   修复 `get_persona_config_value` 中 `llm_timeout=0` 不回退全局配置，新增 `int_fallback_sentinel` 参数支持0值回退
+*   修复人格配置中 `llm_provider_id` 和 `llm_timeout` 虽在 schema 定义但代码从未读取，人格级 LLM 配置完全无效
+*   修复单人格模式（无人格配置时）不检查 `trigger_mode`，始终使用 cron 模式
+*   补全全局 `basic_conf` 缺失的 `trigger_mode`、`sharing_cron`、`cron_random_delay` 字段
+*   补全全局 `qzone_conf` 缺失的 `qzone_trigger_mode`、`qzone_cron` 字段
+*   补全人格 `persona_qzone_conf` 缺失的 `qzone_trigger_mode`、`qzone_cron` 字段
+*   补全人格 `persona_context_conf` 缺失的 `life_context_in_group` 字段
+*   `_call_llm_wrapper` 新增 `persona_name` 参数，支持人格级 LLM 提供商和超时配置
+*   `format_life_context` 新增 `persona_name` 参数，支持人格级群聊拟人化人设开关
+
 ### v5.5.3
 **🐛 修复跨插件硬依赖导致加载失败**
 
