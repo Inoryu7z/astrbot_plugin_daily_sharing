@@ -218,8 +218,8 @@ class ContentService:
                 persona = await self.context.persona_manager.get_persona(persona_id)
                 if persona:
                     info["prompt"] = getattr(persona, "system_prompt", "")
-                    info["bot_name"] = getattr(persona_obj, "bot_name", "") if persona_obj else getattr(persona, "bot_name", "")
-                    info["user_name"] = getattr(persona_obj, "user_name", "") if persona_obj else getattr(persona, "user_name", "")
+                    info["bot_name"] = getattr(persona, "bot_name", "")
+                    info["user_name"] = getattr(persona, "user_name", "")
                     return info
 
             personality = await self.context.persona_manager.get_default_persona_v3()
