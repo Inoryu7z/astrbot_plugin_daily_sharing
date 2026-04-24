@@ -229,7 +229,12 @@
                 "description": "启用生成配图",
                 "type": "string",
                 "default": "",
-                "hint": "留空回退全局，true/false"
+                "options": [
+                  "",
+                  "true",
+                  "false"
+                ],
+                "hint": "留空回退全局"
               },
               "image_enabled_types": {
                 "description": "允许配图的类型",
@@ -247,7 +252,12 @@
                 "description": "启用生成视频",
                 "type": "string",
                 "default": "",
-                "hint": "留空回退全局，true/false",
+                "options": [
+                  "",
+                  "true",
+                  "false"
+                ],
+                "hint": "留空回退全局",
                 "condition": {
                   "enable_ai_image": "true"
                 }
@@ -263,7 +273,12 @@
                 "description": "启用语音转换",
                 "type": "string",
                 "default": "",
-                "hint": "留空回退全局，true/false"
+                "options": [
+                  "",
+                  "true",
+                  "false"
+                ],
+                "hint": "留空回退全局"
               },
               "tts_enabled_types": {
                 "description": "允许语音的类型",
@@ -288,7 +303,12 @@
                 "description": "启用定时分享说说",
                 "type": "string",
                 "default": "",
-                "hint": "留空回退全局，true/false"
+                "options": [
+                  "",
+                  "true",
+                  "false"
+                ],
+                "hint": "留空回退全局"
               },
               "qzone_trigger_mode": {
                 "description": "说说触发模式",
@@ -351,7 +371,12 @@
                 "description": "启用说说配图",
                 "type": "string",
                 "default": "",
-                "hint": "留空回退全局，true/false",
+                "options": [
+                  "",
+                  "true",
+                  "false"
+                ],
+                "hint": "留空回退全局",
                 "condition": {
                   "enable_qzone": "true"
                 }
@@ -458,13 +483,23 @@
                 "description": "启用生活上下文",
                 "type": "string",
                 "default": "",
-                "hint": "留空回退全局，true/false"
+                "options": [
+                  "",
+                  "true",
+                  "false"
+                ],
+                "hint": "留空回退全局"
               },
               "life_context_in_group": {
                 "description": "启用群聊拟人化人设",
                 "type": "string",
                 "default": "",
-                "hint": "留空回退全局，true/false",
+                "options": [
+                  "",
+                  "true",
+                  "false"
+                ],
+                "hint": "留空回退全局",
                 "condition": {
                   "enable_life_context": "true"
                 }
@@ -473,7 +508,12 @@
                 "description": "启用群聊展示日程细节",
                 "type": "string",
                 "default": "",
-                "hint": "留空回退全局，true/false",
+                "options": [
+                  "",
+                  "true",
+                  "false"
+                ],
+                "hint": "留空回退全局",
                 "condition": {
                   "enable_life_context": "true"
                 }
