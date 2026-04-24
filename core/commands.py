@@ -31,7 +31,6 @@ class CommandHandler:
         yield event.plain_result("自动分享已禁用")
 
     async def cmd_status(self, event: AstrMessageEvent):
-        """查看详细状态"""
         target_uid = event.unified_msg_origin
         state_key = f"target_{target_uid}"
         state = await self.db.get_state(state_key, {})
@@ -57,7 +56,6 @@ class CommandHandler:
                 lines.append(f"• {ts} [{t_cn}] {content_preview}")
             hist_txt = "\n".join(lines)
             
-        # 解析独立配置，识别出当前会话是否脱离了全局控制
         adapter_id, real_id = self.plugin.ctx_service._parse_umo(target_uid)
         is_group = self.plugin.ctx_service._is_group_chat(target_uid)
         
@@ -77,14 +75,19 @@ class CommandHandler:
                 custom_cron = conf.get("cron") or "无"
                 target_specific_type = conf.get("seq", "auto")
 
-        # 判定指针读取位置
         is_custom_seq = target_specific_type != "auto" and target_specific_type != "auto"
         idx_display = state.get('custom_sequence_index', 0) if is_custom_seq else state.get('sequence_index', 0)
+
+        personas = self.plugin.get_enabled_personas()
+        persona_info = ""
+        if personas:
+            persona_names = [p.get("persona_name") or p.get("name") or p.get("select_persona", "?") for p in personas]
+            persona_info = f"\n已配置人格: {', '.join(persona_names)}"
 
         msg = f"""每日分享状态
 ================
 运行状态: {'启用' if enabled else '禁用'}
-全局触发: {self.basic_conf.get("trigger_mode", "cron")} ({cron})
+全局触发: {self.basic_conf.get("trigger_mode", "cron")} ({cron}){persona_info}
 
 【当前会话独立配置】
 独立定时: {custom_cron}

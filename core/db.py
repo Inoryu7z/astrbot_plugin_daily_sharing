@@ -28,6 +28,7 @@ class DatabaseManager:
                 sharing_type TEXT,
                 content TEXT,
                 success INTEGER,
+                persona_name TEXT DEFAULT '',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
@@ -39,6 +40,7 @@ class DatabaseManager:
                 target_id TEXT,
                 category TEXT,
                 content_key TEXT,
+                persona_name TEXT DEFAULT '',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
@@ -53,7 +55,22 @@ class DatabaseManager:
         ''')
         
         conn.commit()
+
+        self._migrate_add_persona_name(conn)
         conn.close()
+
+    def _migrate_add_persona_name(self, conn):
+        cursor = conn.cursor()
+        for table in ("sent_history", "topic_history"):
+            try:
+                cursor.execute(f"PRAGMA table_info({table})")
+                columns = [row[1] for row in cursor.fetchall()]
+                if "persona_name" not in columns:
+                    cursor.execute(f"ALTER TABLE {table} ADD COLUMN persona_name TEXT DEFAULT ''")
+                    conn.commit()
+                    logger.info(f"[DailySharing] 已为 {table} 表添加 persona_name 字段")
+            except Exception as e:
+                logger.warning(f"[DailySharing] 迁移 {table} 表失败: {e}")
 
     # ========== 异步执行辅助方法 ==========
     
@@ -106,21 +123,21 @@ class DatabaseManager:
 
     # ========== 历史记录 ==========
 
-    def _sync_add_history(self, target_id, sharing_type, content, success):
+    def _sync_add_history(self, target_id, sharing_type, content, success, persona_name=""):
         conn = self._get_conn()
         cursor = conn.cursor()
         
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
         cursor.execute('''
-            INSERT INTO sent_history (target_id, sharing_type, content, success, created_at)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (str(target_id), str(sharing_type), str(content), 1 if success else 0, now_str))
+            INSERT INTO sent_history (target_id, sharing_type, content, success, persona_name, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (str(target_id), str(sharing_type), str(content), 1 if success else 0, str(persona_name), now_str))
         conn.commit()
         conn.close()
 
-    async def add_sent_history(self, target_id: str, sharing_type: str, content: str, success: bool = True):
-        await self._execute(self._sync_add_history, target_id, sharing_type, content, success)
+    async def add_sent_history(self, target_id: str, sharing_type: str, content: str, success: bool = True, persona_name: str = ""):
+        await self._execute(self._sync_add_history, target_id, sharing_type, content, success, persona_name)
 
     def _sync_get_recent_history(self, limit: int) -> List[Dict]:
         conn = self._get_conn()
@@ -155,22 +172,21 @@ class DatabaseManager:
 
     # ========== 话题去重 ==========
 
-    def _sync_record_topic(self, target_id, category, content_key):
+    def _sync_record_topic(self, target_id, category, content_key, persona_name=""):
         conn = self._get_conn()
         cursor = conn.cursor()
         
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
         cursor.execute('''
-            INSERT INTO topic_history (target_id, category, content_key, created_at)
-            VALUES (?, ?, ?, ?)
-        ''', (str(target_id), str(category), str(content_key), now_str))
+            INSERT INTO topic_history (target_id, category, content_key, persona_name, created_at)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (str(target_id), str(category), str(content_key), str(persona_name), now_str))
         conn.commit()
         conn.close()
 
-    async def record_topic(self, target_id: str, category: str, content_key: str):
-        """记录使用过的话题"""
-        await self._execute(self._sync_record_topic, target_id, category, content_key)
+    async def record_topic(self, target_id: str, category: str, content_key: str, persona_name: str = ""):
+        await self._execute(self._sync_record_topic, target_id, category, content_key, persona_name)
 
     def _sync_get_used_topics(self, target_id, category, days_limit=60) -> List[str]:
         conn = self._get_conn()

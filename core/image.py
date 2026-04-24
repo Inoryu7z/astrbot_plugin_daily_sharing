@@ -167,7 +167,7 @@ class ImageService:
 
     # ==================== 2. 主入口 ====================
 
-    async def generate_image(self, content: str, sharing_type: SharingType, life_context: str = None) -> Optional[str]:
+    async def generate_image(self, content: str, sharing_type: SharingType, life_context: str = None, persona_name: str = None) -> Optional[str]:
         if not self.img_conf.get("enable_ai_image", False): return None
 
         is_text_priority = self.img_conf.get("priority_text_over_schedule", True)
@@ -197,7 +197,7 @@ class ImageService:
         logger.info(f"[DailySharing] 最终配图 Prompt: {prompt[:100]}...")
         self._last_image_description = prompt
 
-        return await self._call_aiimg_selfie(prompt)
+        return await self._call_aiimg_selfie(prompt, persona_name=persona_name)
 
     def _assemble_selfie_prompt(self, content: str, sharing_type: SharingType, visuals: Dict) -> str:
         parts = []
@@ -343,7 +343,7 @@ class ImageService:
             logger.debug(f"[DailySharing] 获取默认人格名失败: {e}")
         return None
 
-    async def _call_aiimg_selfie(self, prompt: str) -> Optional[str]:
+    async def _call_aiimg_selfie(self, prompt: str, persona_name: str = None) -> Optional[str]:
         self._ensure_plugin()
         if not self._aiimg_plugin:
             logger.error("[DailySharing] 未找到AI图像插件，请确保已安装 astrbot_plugin_aiimg")
@@ -352,19 +352,19 @@ class ImageService:
         aiimg = self._aiimg_plugin
 
         try:
-            persona_name = await self._get_default_persona_name()
-            if not persona_name:
+            resolved_persona = persona_name or await self._get_default_persona_name()
+            if not resolved_persona:
                 logger.error("[DailySharing] 未获取到默认人格名称，无法使用自拍功能。请在 AstrBot 中配置默认人格。")
                 return None
 
-            logger.info(f"[DailySharing] 使用自拍模式，人格: {persona_name}")
+            logger.info(f"[DailySharing] 使用自拍模式，人格: {resolved_persona}")
 
             ref_paths = []
             if hasattr(aiimg, "_get_persona_config_selfie_reference_paths"):
-                ref_paths = aiimg._get_persona_config_selfie_reference_paths(persona_name)
+                ref_paths = aiimg._get_persona_config_selfie_reference_paths(resolved_persona)
 
             if not ref_paths:
-                logger.error(f"[DailySharing] 人格「{persona_name}」未配置自拍参考照。请在 aiimg 插件的 WebUI 中为该人格配置参考图。")
+                logger.error(f"[DailySharing] 人格「{resolved_persona}」未配置自拍参考照。请在 aiimg 插件的 WebUI 中为该人格配置参考图。")
                 return None
 
             if not hasattr(aiimg, "_read_paths_bytes") or not hasattr(aiimg, "edit"):
@@ -373,23 +373,23 @@ class ImageService:
 
             ref_images = await aiimg._read_paths_bytes(ref_paths)
             if not ref_images:
-                logger.error(f"[DailySharing] 人格「{persona_name}」的参考图文件读取失败")
+                logger.error(f"[DailySharing] 人格「{resolved_persona}」的参考图文件读取失败")
                 return None
 
             logger.info(f"[DailySharing] 获取到 {len(ref_images)} 张参考图")
 
             chain_override = None
             if hasattr(aiimg, "_get_persona_selfie_chain"):
-                chain_override = aiimg._get_persona_selfie_chain(persona_name)
+                chain_override = aiimg._get_persona_selfie_chain(resolved_persona)
 
             if not chain_override:
-                logger.error(f"[DailySharing] 人格「{persona_name}」未配置自拍服务商链路。请在 aiimg 插件的 WebUI 中为该人格配置 chain。")
+                logger.error(f"[DailySharing] 人格「{resolved_persona}」未配置自拍服务商链路。请在 aiimg 插件的 WebUI 中为该人格配置 chain。")
                 return None
 
             size = None
             prompt_prefix = ""
             if hasattr(aiimg, "_get_persona_selfie_config"):
-                persona_conf = aiimg._get_persona_selfie_config(persona_name)
+                persona_conf = aiimg._get_persona_selfie_config(resolved_persona)
                 if persona_conf:
                     default_output = str(persona_conf.get("default_output", "") or "").strip()
                     if default_output:
@@ -408,7 +408,7 @@ class ImageService:
             if self.debug_mode:
                 logger.info("=" * 60)
                 logger.info("[DailySharing] 【DEBUG】自拍模式参数：")
-                logger.info(f"[DailySharing] 【DEBUG】人格: {persona_name}")
+                logger.info(f"[DailySharing] 【DEBUG】人格: {resolved_persona}")
                 logger.info(f"[DailySharing] 【DEBUG】参考图数量: {len(ref_images)}")
                 logger.info(f"[DailySharing] 【DEBUG】服务商链路: {[x.get('provider_id') for x in chain_override if isinstance(x, dict)]}")
                 logger.info(f"[DailySharing] 【DEBUG】输出尺寸: {size or 'default'}")

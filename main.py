@@ -21,8 +21,9 @@ from .core.context import ContextService
 from .core.db import DatabaseManager 
 from .core.tasks import TaskManager
 from .core.commands import CommandHandler
+from .core.persona_utils import PersonaConfigMixin
 
-class DailySharingPlugin(Star):
+class DailySharingPlugin(Star, PersonaConfigMixin):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
         self.config = config 
@@ -91,6 +92,66 @@ class DailySharingPlugin(Star):
         bot_init_task = asyncio.create_task(self._delayed_init_bots())
         self._bg_tasks.add(bot_init_task)
         bot_init_task.add_done_callback(self._bg_tasks.discard)
+
+        # 多人格支持
+        self._persona_cache = {}
+
+    def get_enabled_personas(self) -> list:
+        entries = self._persona_entries()
+        return [e for e in entries if e.get("enabled", True)]
+
+    def get_persona_config_value(self, persona_name: str, conf_key: str, sub_key: str, default=None):
+        item = self._find_persona_config(persona_name)
+        if item is not None:
+            persona_conf = item.get(conf_key, {})
+            if isinstance(persona_conf, dict) and sub_key in persona_conf:
+                val = persona_conf[sub_key]
+                if val is not None and val != "" and val != [] and val != -1:
+                    if isinstance(val, str) and val.lower() in ("true", "false"):
+                        return val.lower() == "true"
+                    return val
+        global_conf = self.config.get(conf_key, {})
+        if isinstance(global_conf, dict):
+            return global_conf.get(sub_key, default)
+        return default
+
+    def get_persona_receiver(self, persona_name: str) -> dict:
+        item = self._find_persona_config(persona_name)
+        if item is not None:
+            pr = item.get("persona_receiver", {})
+            if isinstance(pr, dict) and (pr.get("groups") or pr.get("users") or pr.get("adapter_id")):
+                return pr
+        return self.receiver_conf
+
+    async def resolve_persona_from_event(self, event) -> str:
+        try:
+            session_id = getattr(event, "unified_msg_origin", None)
+            if session_id:
+                conv_mgr = getattr(self.context, "conversation_manager", None)
+                if conv_mgr:
+                    conv_id = await conv_mgr.get_curr_conversation_id(session_id)
+                    if conv_id:
+                        conv = await conv_mgr.get_conversation(conv_id)
+                        if conv:
+                            bound_pid = getattr(conv, "persona_id", None)
+                            if bound_pid:
+                                persona_mgr = getattr(self.context, "persona_manager", None)
+                                if persona_mgr:
+                                    persona_obj = await persona_mgr.get_persona(bound_pid)
+                                    if persona_obj:
+                                        name = getattr(persona_obj, "name", "") or getattr(persona_obj, "persona_id", "")
+                                        if name:
+                                            canonical = self._canonical_persona_name(name)
+                                            if canonical:
+                                                return canonical
+        except Exception:
+            pass
+        entries = self.get_enabled_personas()
+        if entries:
+            first_name = entries[0].get("persona_name") or entries[0].get("name") or entries[0].get("select_persona", "")
+            if first_name:
+                return self._canonical_persona_name(first_name) or first_name
+        return ""
 
     def _inject_qzone_client(self, qzone_plugin):
         """尝试为 QQ空间 插件注入 CQHttp 客户端，解决自动任务时没有 client 的报错"""

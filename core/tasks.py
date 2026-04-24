@@ -33,40 +33,76 @@ class TaskManager:
         self.receiver_conf = plugin.receiver_conf
 
     def setup_tasks(self):
-        if self.plugin.config.get("enable_auto_sharing", False):
-            cron = self.basic_conf.get("sharing_cron", "0 8,20 * * *")
-            self.setup_cron(cron)
-            logger.debug(f"[DailySharing] 分享内容定时任务已启动 ({cron})")
-            
-            # 扫描并注册所有带独立时间的独立定时任务
-            self.setup_custom_target_crons()
+        personas = self.plugin.get_enabled_personas()
+
+        if personas:
+            for persona_entry in personas:
+                pname = persona_entry.get("persona_name") or persona_entry.get("name") or persona_entry.get("select_persona", "")
+                if not pname:
+                    continue
+                canonical = self.plugin._canonical_persona_name(pname) or pname
+                self._setup_persona_tasks(canonical, persona_entry)
         else:
-            logger.debug("[DailySharing] 分享内容已禁用")
+            if self.plugin.config.get("enable_auto_sharing", False):
+                cron = self.basic_conf.get("sharing_cron", "0 8,20 * * *")
+                self.setup_cron(cron, persona_name=None)
+                self.setup_custom_target_crons(persona_name=None)
+                logger.debug(f"[DailySharing] 单人格模式：分享内容定时任务已启动 ({cron})")
 
         enable_60s = self.extra_shares_conf.get("enable_60s_news", False)
         enable_ai = self.extra_shares_conf.get("enable_ai_news", False)
         
-        # 只要有一个开启，就注册定时任务
         if enable_60s or enable_ai:
             cron_briefing = self.extra_shares_conf.get("cron_briefing", "0 8 * * *")
             self._setup_cron_job_custom("share_briefing", cron_briefing, self._task_wrapper_briefing)
             logger.debug(f"[DailySharing] 早报定时任务已启动 ({cron_briefing})")
 
-        if self.qzone_conf.get("enable_qzone", False):
-            self.setup_qzone_cron()
-
-        # 启动时恢复因为重启而中断的延迟任务
         asyncio.create_task(self._recover_pending_jobs())
 
-    def setup_custom_target_crons(self):
-        """解析并为写了独立时间的群聊、私聊挂载独立定时 (支持随机延迟)"""
-        default_adapter_id = self._resolve_adapter_id("setup_custom_target_crons")
+    def _setup_persona_tasks(self, persona_name: str, persona_entry: dict):
+        if not self.plugin.config.get("enable_auto_sharing", False):
+            return
 
-        r_groups = self._parse_targets_config(self.receiver_conf.get("groups", []))
-        r_users = self._parse_targets_config(self.receiver_conf.get("users", []))
+        persona_receiver = self.plugin.get_persona_receiver(persona_name)
+        has_targets = bool(persona_receiver.get("groups") or persona_receiver.get("users"))
 
-        # 清除旧的 custom_share 任务
-        job_ids = [job.id for job in self.scheduler.get_jobs() if job.id.startswith("custom_share_")]
+        if not has_targets:
+            logger.debug(f"[DailySharing] 人格 [{persona_name}] 未配置接收对象，跳过定时任务")
+            return
+
+        persona_basic = persona_entry.get("persona_basic_conf", {})
+        trigger_mode = persona_basic.get("trigger_mode", "") or self.basic_conf.get("trigger_mode", "random_period")
+
+        if trigger_mode == "cron":
+            cron = persona_basic.get("sharing_cron", "") or self.basic_conf.get("sharing_cron", "0 8,20 * * *")
+            self.setup_cron(cron, persona_name=persona_name)
+        elif trigger_mode == "random_period":
+            job_id_prefix = f"persona_{persona_name}_"
+            daily_sched_id = f"{job_id_prefix}daily_random_scheduler"
+            self._setup_cron_job_custom(daily_sched_id, "0 0 * * *", self._make_persona_daily_random_scheduler(persona_name))
+            asyncio.create_task(self._make_persona_daily_random_scheduler(persona_name)())
+            logger.debug(f"[DailySharing] 人格 [{persona_name}] 已启用多时间段随机生成模式")
+
+        self.setup_custom_target_crons(persona_name=persona_name)
+
+        persona_qzone = persona_entry.get("persona_qzone_conf", {})
+        qzone_enabled = persona_qzone.get("enable_qzone", "")
+        if isinstance(qzone_enabled, str):
+            qzone_enabled = qzone_enabled.lower() == "true" if qzone_enabled else self.qzone_conf.get("enable_qzone", False)
+        if qzone_enabled:
+            self.setup_qzone_cron(persona_name=persona_name)
+
+        logger.debug(f"[DailySharing] 人格 [{persona_name}] 定时任务已挂载")
+
+    def setup_custom_target_crons(self, persona_name=None):
+        receiver_conf = self.plugin.get_persona_receiver(persona_name) if persona_name else self.receiver_conf
+        default_adapter_id = self._resolve_adapter_id("setup_custom_target_crons", receiver_conf=receiver_conf)
+
+        r_groups = self._parse_targets_config(receiver_conf.get("groups", []))
+        r_users = self._parse_targets_config(receiver_conf.get("users", []))
+
+        prefix = f"persona_{persona_name}_" if persona_name else "custom_share_"
+        job_ids = [job.id for job in self.scheduler.get_jobs() if job.id.startswith(prefix)]
         for jid in job_ids:
             self.scheduler.remove_job(jid)
 
@@ -225,36 +261,238 @@ class TaskManager:
                 else:
                     await self.db.update_state_dict(f"target_{tid}", {"pending_delay_job": None})
 
-    def setup_cron(self, cron_str):
-        """设置自动分享触发器 (支持 cron 和 random_period)"""
-        # 个人偏好：仅使用随机时间段模式，cron 配置项已从 UI 移除但代码保留
+    def setup_cron(self, cron_str, persona_name=None):
         trigger_mode = self.basic_conf.get("trigger_mode", "random_period")
+        if persona_name:
+            item = self.plugin._find_persona_config(persona_name)
+            if item:
+                persona_basic = item.get("persona_basic_conf", {})
+                trigger_mode = persona_basic.get("trigger_mode", "") or trigger_mode
         
         if trigger_mode == "cron":
-            self._setup_cron_job_custom("auto_share", cron_str, self._task_wrapper)
+            job_id = f"auto_share_{persona_name}" if persona_name else "auto_share"
+            self._setup_cron_job_custom(job_id, cron_str, self._make_task_wrapper(persona_name))
         elif trigger_mode == "random_period":
-            # 每天凌晨 00:00 重新生成当天的随机任务
-            self._setup_cron_job_custom("daily_random_scheduler", "0 0 * * *", self._schedule_daily_random_jobs)
-            # 启动时立刻安排一次今天的任务
-            asyncio.create_task(self._schedule_daily_random_jobs())
-            logger.debug(f"[DailySharing] 已启用多时间段随机生成模式")
+            sched_id = f"daily_random_scheduler_{persona_name}" if persona_name else "daily_random_scheduler"
+            self._setup_cron_job_custom(sched_id, "0 0 * * *", self._make_persona_daily_random_scheduler(persona_name))
+            asyncio.create_task(self._make_persona_daily_random_scheduler(persona_name)())
+            logger.debug(f"[DailySharing] {'人格 ['+persona_name+'] ' if persona_name else ''}已启用多时间段随机生成模式")
 
-    def setup_qzone_cron(self):
-        """设置 QQ 空间自动分享触发器"""
-        # 个人偏好：仅使用随机时间段模式，cron 配置项已从 UI 移除但代码保留
-        trigger_mode = self.qzone_conf.get("qzone_trigger_mode", "random_period")
+    def setup_qzone_cron(self, persona_name=None):
+        qzone_conf = self.qzone_conf
+        if persona_name:
+            item = self.plugin._find_persona_config(persona_name)
+            if item:
+                persona_qzone = item.get("persona_qzone_conf", {})
+                qzone_conf = {**self.qzone_conf, **{k: v for k, v in persona_qzone.items() if v not in ("", [], -1)}}
+
+        trigger_mode = qzone_conf.get("qzone_trigger_mode", "random_period")
         
         if trigger_mode == "cron":
-            q_cron = self.qzone_conf.get("qzone_cron", "0 20 * * *")
+            q_cron = qzone_conf.get("qzone_cron", "0 20 * * *")
             actual_q_cron = CRON_TEMPLATES.get(q_cron, q_cron)
-            self._setup_cron_job_custom("qzone_share", actual_q_cron, self._task_wrapper_qzone)
-            logger.debug(f"[DailySharing] QQ空间定时任务已启动 ({actual_q_cron})")
+            job_id = f"qzone_share_{persona_name}" if persona_name else "qzone_share"
+            self._setup_cron_job_custom(job_id, actual_q_cron, self._make_qzone_task_wrapper(persona_name))
+            logger.debug(f"[DailySharing] {'人格 ['+persona_name+'] ' if persona_name else ''}QQ空间定时任务已启动 ({actual_q_cron})")
         elif trigger_mode == "random_period":
-            # 每天凌晨 00:00 重新生成当天的QQ空间随机任务
-            self._setup_cron_job_custom("daily_qzone_random_scheduler", "0 0 * * *", self._schedule_daily_qzone_random_jobs)
-            # 启动时立刻安排一次今天的任务
-            asyncio.create_task(self._schedule_daily_qzone_random_jobs())
-            logger.debug(f"[DailySharing] QQ空间已启用多时间段随机生成模式")
+            sched_id = f"daily_qzone_random_scheduler_{persona_name}" if persona_name else "daily_qzone_random_scheduler"
+            self._setup_cron_job_custom(sched_id, "0 0 * * *", self._make_persona_qzone_random_scheduler(persona_name))
+            asyncio.create_task(self._make_persona_qzone_random_scheduler(persona_name)())
+            logger.debug(f"[DailySharing] {'人格 ['+persona_name+'] ' if persona_name else ''}QQ空间已启用多时间段随机生成模式")
+
+    def _make_task_wrapper(self, persona_name=None):
+        async def wrapper():
+            if self.plugin._is_terminated: return
+            try:
+                days_limit = self.content_service.dedup_days
+                await self.db.clean_expired_data(days_limit)
+            except Exception as e:
+                logger.warning(f"[DailySharing] 数据库清理失败: {e}")
+
+            trigger_mode = self.basic_conf.get("trigger_mode", "random_period")
+            if persona_name:
+                item = self.plugin._find_persona_config(persona_name)
+                if item:
+                    persona_basic = item.get("persona_basic_conf", {})
+                    trigger_mode = persona_basic.get("trigger_mode", "") or trigger_mode
+
+            random_delay_min = 0
+            if trigger_mode == "cron":
+                try:
+                    random_delay_min = int(self.basic_conf.get("cron_random_delay", 0))
+                except Exception:
+                    pass
+
+            if random_delay_min > 0:
+                delay_seconds = random.randint(0, random_delay_min * 60)
+                if delay_seconds > 0:
+                    target_time = datetime.now() + timedelta(seconds=delay_seconds)
+                    state_key = f"global_{persona_name}" if persona_name else "global"
+                    await self.db.update_state_dict(state_key, {"pending_delay_job": {"target_time": target_time.timestamp()}})
+                    job_id = f"delayed_auto_share_{persona_name}" if persona_name else "delayed_auto_share"
+                    self.scheduler.add_job(
+                        self._make_delayed_task(persona_name), 'date',
+                        run_date=target_time, id=job_id, replace_existing=True
+                    )
+                    return
+
+            await self._make_delayed_task(persona_name)()
+        return wrapper
+
+    def _make_delayed_task(self, persona_name=None):
+        async def delayed():
+            if self.plugin._is_terminated: return
+            task = asyncio.current_task()
+            self.plugin._bg_tasks.add(task)
+            try:
+                state_key = f"global_{persona_name}" if persona_name else "global"
+                await self.db.update_state_dict(state_key, {"pending_delay_job": None})
+                now = datetime.now()
+                if self.plugin._last_share_time:
+                    if (now - self.plugin._last_share_time).total_seconds() < 60:
+                        logger.debug("[DailySharing] 检测到近期已执行任务，跳过本次触发。")
+                        return
+                if self._lock.locked():
+                    logger.warning("[DailySharing] 上一个任务正在进行中，跳过本次触发。")
+                    return
+                async with self._lock:
+                    self.plugin._last_share_time = now
+                    logger.info(f"[DailySharing] 开始执行分享任务{' [人格: '+persona_name+']' if persona_name else ''}...")
+                    await self.execute_share(persona_name=persona_name)
+            finally:
+                self.plugin._bg_tasks.discard(task)
+        return delayed
+
+    def _make_qzone_task_wrapper(self, persona_name=None):
+        async def wrapper():
+            if self.plugin._is_terminated: return
+            task = asyncio.current_task()
+            self.plugin._bg_tasks.add(task)
+            try:
+                await self.execute_qzone_share(persona_name=persona_name)
+            finally:
+                self.plugin._bg_tasks.discard(task)
+        return wrapper
+
+    def _make_persona_daily_random_scheduler(self, persona_name=None):
+        async def scheduler():
+            if self.plugin._is_terminated: return
+            prefix = f"persona_{persona_name}_random_" if persona_name else "random_share_"
+            job_ids = [job.id for job in self.scheduler.get_jobs() if job.id.startswith(prefix)]
+            for jid in job_ids:
+                self.scheduler.remove_job(jid)
+
+            periods = self.plugin.get_persona_config_value(persona_name, "persona_basic_conf", "random_periods", None)
+            if not periods:
+                periods = self.basic_conf.get("random_periods", ["08:00-10:00", "19:00-21:00"])
+
+            now = datetime.now()
+            date_str = now.strftime("%Y-%m-%d")
+            state_key = f"global_{persona_name}" if persona_name else "global"
+            state = await self.db.get_state(state_key, {})
+            random_schedule = state.get("random_schedule", {})
+
+            is_modified = False
+            if random_schedule.get("date") != date_str:
+                random_schedule = {"date": date_str, "jobs": {}}
+                is_modified = True
+
+            jobs = random_schedule.get("jobs", {})
+            stale_periods = [p for p in jobs.keys() if p not in periods]
+            for p in stale_periods:
+                del jobs[p]
+                is_modified = True
+
+            for period_str in periods:
+                if period_str not in jobs:
+                    try:
+                        start_str, end_str = period_str.split('-')
+                        start_h, start_m = map(int, start_str.split(':'))
+                        end_h, end_m = map(int, end_str.split(':'))
+                        start_dt = now.replace(hour=start_h, minute=start_m, second=0, microsecond=0)
+                        end_dt = now.replace(hour=end_h, minute=end_m, second=59, microsecond=0)
+                        if end_dt <= start_dt: continue
+                        random_seconds = random.randint(0, int((end_dt - start_dt).total_seconds()))
+                        run_time = start_dt + timedelta(seconds=random_seconds)
+                        jobs[period_str] = run_time.timestamp()
+                        is_modified = True
+                    except Exception as e:
+                        logger.error(f"[DailySharing] 解析时间段 {period_str} 失败: {e}")
+
+            if is_modified:
+                random_schedule["jobs"] = jobs
+                await self.db.update_state_dict(state_key, {"random_schedule": random_schedule})
+
+            for idx, (period_str, timestamp) in enumerate(jobs.items()):
+                run_time = datetime.fromtimestamp(timestamp)
+                if run_time > now:
+                    job_id = f"{prefix}{idx}"
+                    self.scheduler.add_job(
+                        self._make_task_wrapper(persona_name), 'date',
+                        run_date=run_time, id=job_id, replace_existing=True
+                    )
+                    logger.debug(f"[DailySharing] {'人格 ['+persona_name+'] ' if persona_name else ''}今日随机任务 [{period_str}] 已安排在: {run_time.strftime('%H:%M:%S')} 执行")
+        return scheduler
+
+    def _make_persona_qzone_random_scheduler(self, persona_name=None):
+        async def scheduler():
+            if self.plugin._is_terminated: return
+            prefix = f"persona_{persona_name}_qzone_random_" if persona_name else "qzone_random_share_"
+            job_ids = [job.id for job in self.scheduler.get_jobs() if job.id.startswith(prefix)]
+            for jid in job_ids:
+                self.scheduler.remove_job(jid)
+
+            periods = self.plugin.get_persona_config_value(persona_name, "persona_qzone_conf", "qzone_random_periods", None)
+            if not periods:
+                periods = self.qzone_conf.get("qzone_random_periods", ["08:00-10:00", "19:00-21:00"])
+
+            now = datetime.now()
+            date_str = now.strftime("%Y-%m-%d")
+            state_key = f"qzone_{persona_name}" if persona_name else "qzone"
+            state = await self.db.get_state(state_key, {})
+            qzone_random_schedule = state.get("random_schedule", {})
+
+            is_modified = False
+            if qzone_random_schedule.get("date") != date_str:
+                qzone_random_schedule = {"date": date_str, "jobs": {}}
+                is_modified = True
+
+            jobs = qzone_random_schedule.get("jobs", {})
+            stale_periods = [p for p in jobs.keys() if p not in periods]
+            for p in stale_periods:
+                del jobs[p]
+                is_modified = True
+
+            for period_str in periods:
+                if period_str not in jobs:
+                    try:
+                        start_str, end_str = period_str.split('-')
+                        start_h, start_m = map(int, start_str.split(':'))
+                        end_h, end_m = map(int, end_str.split(':'))
+                        start_dt = now.replace(hour=start_h, minute=start_m, second=0, microsecond=0)
+                        end_dt = now.replace(hour=end_h, minute=end_m, second=59, microsecond=0)
+                        if end_dt <= start_dt: continue
+                        random_seconds = random.randint(0, int((end_dt - start_dt).total_seconds()))
+                        run_time = start_dt + timedelta(seconds=random_seconds)
+                        jobs[period_str] = run_time.timestamp()
+                        is_modified = True
+                    except Exception as e:
+                        logger.error(f"[DailySharing] 解析QQ空间时间段 {period_str} 失败: {e}")
+
+            if is_modified:
+                qzone_random_schedule["jobs"] = jobs
+                await self.db.update_state_dict(state_key, {"random_schedule": qzone_random_schedule})
+
+            for idx, (period_str, timestamp) in enumerate(jobs.items()):
+                run_time = datetime.fromtimestamp(timestamp)
+                if run_time > now:
+                    job_id = f"{prefix}{idx}"
+                    self.scheduler.add_job(
+                        self._make_qzone_task_wrapper(persona_name), 'date',
+                        run_date=run_time, id=job_id, replace_existing=True
+                    )
+                    logger.debug(f"[DailySharing] {'人格 ['+persona_name+'] ' if persona_name else ''}今日QQ空间随机任务 [{period_str}] 已安排在: {run_time.strftime('%H:%M:%S')} 执行")
+        return scheduler
 
     async def _schedule_daily_random_jobs(self):
         """每天计算并在 scheduler 中添加当天的随机时间点任务"""
@@ -560,9 +798,9 @@ class TaskManager:
             TimePeriod.LATE_NIGHT: "22:00-24:00"
         }.get(period, "")
 
-    def _resolve_adapter_id(self, context_source: str = "unknown") -> str:
-        """获取并缓存目标适配器 ID"""
-        configured_id = self.receiver_conf.get("adapter_id", "").strip()
+    def _resolve_adapter_id(self, context_source: str = "unknown", receiver_conf=None) -> str:
+        rc = receiver_conf or self.receiver_conf
+        configured_id = rc.get("adapter_id", "").strip()
         if configured_id:
             if self.plugin._cached_adapter_id != configured_id:
                 self.plugin._cached_adapter_id = configured_id
@@ -587,10 +825,9 @@ class TaskManager:
         logger.warning(f"[DailySharing] 无法确定适配器 ID，使用兜底值 '{fallback_id}' ({context_source})")
         return fallback_id
 
-    async def decide_type_with_state(self, current_period: TimePeriod, is_qzone: bool = False, target_id: str = None, specific_type: str = "auto") -> SharingType:
-        """带目标ID状态的分享类型决定，支持自定义列表轮换 + 心情驱动加权随机"""
+    async def decide_type_with_state(self, current_period: TimePeriod, is_qzone: bool = False, target_id: str = None, specific_type: str = "auto", persona_name: str = None) -> SharingType:
         if is_qzone:
-            state_key = "qzone"
+            state_key = f"qzone_{persona_name}" if persona_name else "qzone"
         else:
             state_key = f"target_{target_id}" if target_id else "global"
             
@@ -632,7 +869,15 @@ class TaskManager:
         }
         
         config_key = config_key_map.get(current_period)
-        seq = conf_node.get(config_key, [])
+        seq = []
+
+        if persona_name:
+            persona_conf_key = "persona_qzone_conf" if is_qzone else "persona_basic_conf"
+            persona_seq_key = f"{prefix}{current_period.name.lower()}_sequence"
+            seq = self.plugin.get_persona_config_value(persona_name, persona_conf_key, persona_seq_key, None) or []
+
+        if not seq:
+            seq = conf_node.get(config_key, [])
         
         if not seq:
             fallback = QZONE_SHARING_TYPE_SEQUENCES if is_qzone else SHARING_TYPE_SEQUENCES
@@ -640,7 +885,7 @@ class TaskManager:
 
         last_type = state.get("last_type", "")
 
-        mood_candidates = await self._get_mood_driven_candidates(seq)
+        mood_candidates = await self._get_mood_driven_candidates(seq, persona_name=persona_name)
 
         if mood_candidates:
             candidates = mood_candidates
@@ -676,14 +921,14 @@ class TaskManager:
         try: return SharingType(selected)
         except: return SharingType.GREETING
 
-    async def _get_mood_driven_candidates(self, fallback_seq: list) -> list:
+    async def _get_mood_driven_candidates(self, fallback_seq: list, persona_name: str = None) -> list:
         """根据 DayMind 心情数据筛选候选类型池"""
         try:
             content_svc = self.content_service
             if not content_svc:
                 return []
 
-            mood_data = await content_svc._get_daymind_mood()
+            mood_data = await content_svc._get_daymind_mood(persona_name=persona_name)
             if not mood_data:
                 return []
 
@@ -747,18 +992,16 @@ class TaskManager:
                     res[target_id] = {"cron": cron_str, "seq": seq_str}
         return res
 
-    def get_broadcast_targets(self, exclude_custom_cron=False):
-        """辅助方法：获取需要广播的目标列表。exclude_custom_cron 启用时会跳过有独立时间的群"""
+    def get_broadcast_targets(self, exclude_custom_cron=False, receiver_conf=None):
         targets = []
-        default_adapter_id = self._resolve_adapter_id("get_broadcast_targets")
+        rc = receiver_conf or self.receiver_conf
+        default_adapter_id = self._resolve_adapter_id("get_broadcast_targets", receiver_conf=rc)
 
         if default_adapter_id:
-            # 解析配置为字典（支持冒号写法）
-            r_groups = self._parse_targets_config(self.receiver_conf.get("groups", []))
-            r_users = self._parse_targets_config(self.receiver_conf.get("users", []))
+            r_groups = self._parse_targets_config(rc.get("groups", []))
+            r_users = self._parse_targets_config(rc.get("users", []))
             for gid, conf in r_groups.items():
                 if gid:
-                    # 如果全局广播开启了排除，且这个群有独立定时，跳过！
                     if exclude_custom_cron and isinstance(conf, dict) and conf.get("cron"):
                         continue
                     targets.append(f"{default_adapter_id}:GroupMessage:{gid}")
@@ -1117,40 +1360,36 @@ class TaskManager:
             except Exception as e:
                 logger.error(f"[DailySharing] 分享早报到 {uid} 失败: {e}")
 
-    async def execute_share(self, force_type: SharingType = None, news_source: str = None, specific_target: str = None):
-        """执行分享的主流程（支持群聊私聊独立配置与记忆序列）"""
+    async def execute_share(self, force_type: SharingType = None, news_source: str = None, specific_target: str = None, persona_name: str = None):
         if self.plugin._is_terminated: return
 
         period = self.get_curr_period()
-        life_ctx = await self.ctx_service.get_life_context()
+        life_ctx = await self.ctx_service.get_life_context(persona_name=persona_name)
 
         targets = []
         
-        # 1. 确定分享目标
         if specific_target:
             targets.append(specific_target)
         else:
-            # 如果是被全局大定时器唤醒，排除掉那些配置了独立定时的群，绝不打扰它们
-            targets = self.get_broadcast_targets(exclude_custom_cron=True)
+            receiver_conf = self.plugin.get_persona_receiver(persona_name) if persona_name else self.receiver_conf
+            targets = self.get_broadcast_targets(exclude_custom_cron=True, receiver_conf=receiver_conf)
 
         if not targets:
-            logger.warning("[DailySharing] 未配置接收对象，且未指定目标，请在配置页填写群号或QQ号")
+            logger.warning(f"[DailySharing]{' ['+persona_name+']' if persona_name else ''} 未配置接收对象，且未指定目标，请在配置页填写群号或QQ号")
             return
 
-        # 加载并解析带冒号的独立配置
-        r_groups = self._parse_targets_config(self.receiver_conf.get("groups", []))
-        r_users = self._parse_targets_config(self.receiver_conf.get("users", []))
+        receiver_conf = self.plugin.get_persona_receiver(persona_name) if persona_name else self.receiver_conf
+        r_groups = self._parse_targets_config(receiver_conf.get("groups", []))
+        r_users = self._parse_targets_config(receiver_conf.get("users", []))
 
         for uid in targets:
             if self.plugin._is_terminated: break
             try:
                 is_group = "group" in uid.lower() or "room" in uid.lower() or "guild" in uid.lower()
                 
-                # 提取纯数字ID用于读取字典配置
                 adapter_id, real_id = self.ctx_service._parse_umo(uid)
                 
-                # 读取该群聊、私聊独立的类型策略配置（默认 fallback 为 global 设定的 sharing_type）
-                target_specific_type = self.basic_conf.get("sharing_type", "auto")
+                target_specific_type = self.plugin.get_persona_config_value(persona_name, "persona_basic_conf", "sharing_type", None) or self.basic_conf.get("sharing_type", "auto")
                 if is_group and real_id in r_groups:
                     conf = r_groups[real_id]
                     st = conf.get("seq") if isinstance(conf, dict) else conf
@@ -1160,15 +1399,13 @@ class TaskManager:
                     st = conf.get("seq") if isinstance(conf, dict) else conf
                     if st is not None: target_specific_type = st
 
-                # 为该目标决定当前的分享类型
                 if force_type:
                     stype = force_type
                 else:
-                    stype = await self.decide_type_with_state(period, is_qzone=False, target_id=uid, specific_type=target_specific_type)
+                    stype = await self.decide_type_with_state(period, is_qzone=False, target_id=uid, specific_type=target_specific_type, persona_name=persona_name)
 
-                logger.info(f"[DailySharing] 正在为 {uid} 生成内容... 时段: {period.value}, 类型: {stype.value}")
+                logger.info(f"[DailySharing]{' ['+persona_name+']' if persona_name else ''} 正在为 {uid} 生成内容... 时段: {period.value}, 类型: {stype.value}")
                 
-                # 独立获取该目标的新闻数据与去重
                 news_data = None
                 if stype == SharingType.NEWS:
                     state = await self.db.get_state(f"target_{uid}", {})
@@ -1176,13 +1413,12 @@ class TaskManager:
                     
                     current_news_source = news_source
                     if not current_news_source:
-                        current_news_source = self.news_service.select_news_source(excluded_source=last_news_source)
+                        current_news_source = self.news_service.select_news_source(excluded_source=last_news_source, persona_name=persona_name)
                         
                     news_data = await self.news_service.get_hot_news(current_news_source)
                     if news_data:
                         await self.db.update_state_dict(f"target_{uid}", {"last_news_source": news_data[1]})
 
-                # 尝试获取用户昵称 (仅限私聊) 
                 nickname = ""
                 if not is_group:
                     try:
@@ -1198,7 +1434,6 @@ class TaskManager:
 
                 hist_data = await self.ctx_service.get_history_data(uid, is_group)
                 if is_group and "group_info" in hist_data:
-                    # 手动触发时通常忽略策略检查，但自动触发时需要检查
                     if not specific_target and not self.ctx_service.check_group_strategy(hist_data["group_info"]):
                         logger.info(f"[DailySharing] 因策略跳过群组 {uid}")
                         continue
@@ -1207,9 +1442,8 @@ class TaskManager:
                 group_info = hist_data.get("group_info")
                 life_prompt = self.ctx_service.format_life_context(life_ctx, stype, is_group, group_info)
 
-                # 获取近期动态记忆
                 recent_dynamics_str = ""
-                ref_count = self.context_conf.get("reference_history_count", 3)
+                ref_count = self.plugin.get_persona_config_value(persona_name, "persona_context_conf", "reference_history_count", None) or self.context_conf.get("reference_history_count", 3)
                 if ref_count > 0:
                     recent_hist = await self.db.get_recent_history_by_target(uid, limit=ref_count)
                     if recent_hist:
@@ -1220,7 +1454,7 @@ class TaskManager:
                         recent_dynamics_str = "\n".join(lines)
 
                 content = await self.content_service.generate(
-                    stype, period, uid, is_group, life_prompt, hist_prompt, news_data, nickname=nickname, recent_dynamics=recent_dynamics_str
+                    stype, period, uid, is_group, life_prompt, hist_prompt, news_data, nickname=nickname, recent_dynamics=recent_dynamics_str, persona_name=persona_name
                 )
                 
                 if not content:
@@ -1229,22 +1463,22 @@ class TaskManager:
                         target_id=uid,
                         sharing_type=stype.value,
                         content="生成失败 (LLM无响应)",
-                        success=False
+                        success=False,
+                        persona_name=persona_name or ""
                     )
                     continue
                 
-                # 生成多媒体素材 (图片 & 视频 & 语音) 
-                
-                # 1. 配图生成逻辑
                 img_path = None
                 video_url = None
-                enable_img_global = self.image_conf.get("enable_ai_image", False)
-                img_allowed_types = self.image_conf.get("image_enabled_types", ["greeting", "mood", "life_moment", "recommendation"])
+                enable_img_global = self.plugin.get_persona_config_value(persona_name, "persona_image_conf", "enable_ai_image", None)
+                if enable_img_global is None:
+                    enable_img_global = self.image_conf.get("enable_ai_image", False)
+                img_allowed_types = self.plugin.get_persona_config_value(persona_name, "persona_image_conf", "image_enabled_types", None)
+                if not img_allowed_types:
+                    img_allowed_types = self.image_conf.get("image_enabled_types", ["greeting", "mood", "life_moment", "recommendation"])
                 
-                # 【新闻类型特殊处理】如果未开启AI配图或当前类型不允许AI配图，但这是新闻，且配置允许附带热搜图，尝试把热搜图带上
                 if stype == SharingType.NEWS and self.image_conf.get("attach_hot_news_image", True):
                     try:
-                        # 查找独立目标对应的上一个新闻源
                         state = await self.db.get_state(f"target_{uid}", {})
                         last_source = state.get("last_news_source")
                         if last_source:
@@ -1254,27 +1488,30 @@ class TaskManager:
 
                 if enable_img_global:
                     if stype.value in img_allowed_types:
-                        ai_img_path = await self.image_service.generate_image(content, stype, life_ctx)
+                        ai_img_path = await self.image_service.generate_image(content, stype, life_ctx, persona_name=persona_name)
                         if ai_img_path:
-                            # AI 图片覆盖热搜截图
                             img_path = ai_img_path
                             
-                        # 尝试生成视频
-                        if img_path and self.image_conf.get("enable_ai_video", False):
+                        enable_ai_video = self.plugin.get_persona_config_value(persona_name, "persona_image_conf", "enable_ai_video", None)
+                        if enable_ai_video is None:
+                            enable_ai_video = self.image_conf.get("enable_ai_video", False)
+                        if img_path and enable_ai_video:
                             video_allowed = self.image_conf.get("video_enabled_types", ["greeting", "mood"])
                             if stype.value in video_allowed:
                                 video_url = await self.image_service.generate_video_from_image(img_path, content)
                     else:
                          logger.info(f"[DailySharing] 当前类型 {stype.value} 不在配图允许列表，跳过配图。")
 
-                # 2. 语音生成逻辑
                 audio_path = None
-                enable_tts_global = self.tts_conf.get("enable_tts", False)
-                tts_allowed_types = self.tts_conf.get("tts_enabled_types", ["greeting", "mood"])
+                enable_tts_global = self.plugin.get_persona_config_value(persona_name, "persona_tts_conf", "enable_tts", None)
+                if enable_tts_global is None:
+                    enable_tts_global = self.tts_conf.get("enable_tts", False)
+                tts_allowed_types = self.plugin.get_persona_config_value(persona_name, "persona_tts_conf", "tts_enabled_types", None)
+                if not tts_allowed_types:
+                    tts_allowed_types = self.tts_conf.get("tts_enabled_types", ["greeting", "mood"])
                 
                 if enable_tts_global:
                     if stype.value in tts_allowed_types:
-                        # 传入 stype 和 period 以确定情感
                         audio_path = await self.ctx_service.text_to_speech(content, uid, stype, period)
                     else:
                         logger.info(f"[DailySharing] 当前类型 {stype.value} 不在语音允许列表，跳过语音。")
@@ -1296,7 +1533,8 @@ class TaskManager:
                     target_id=uid,
                     sharing_type=stype.value,
                     content=clean_content_for_log[:100] + "...",
-                    success=True
+                    success=True,
+                    persona_name=persona_name or ""
                 )
                 
                 await asyncio.sleep(2) 
@@ -1306,8 +1544,7 @@ class TaskManager:
                 import traceback
                 logger.error(traceback.format_exc())               
 
-    async def execute_qzone_share(self, force_type: SharingType = None, news_source: str = None, event: AstrMessageEvent = None):
-        """完全独立的 QQ 空间执行主流程"""
+    async def execute_qzone_share(self, force_type: SharingType = None, news_source: str = None, event: AstrMessageEvent = None, persona_name: str = None):
         if self.plugin._is_terminated: return
         
         try:
@@ -1320,12 +1557,10 @@ class TaskManager:
 
             self.plugin._inject_qzone_client(qzone_plugin)
             period = self.get_curr_period()
-            # 注意这里传入 is_qzone=True，使用独立序列
-            stype = force_type if force_type else await self.decide_type_with_state(period, is_qzone=True) 
-            logger.info(f"[DailySharing] QQ空间时段: {period.value}, 类型: {stype.value}")
+            stype = force_type if force_type else await self.decide_type_with_state(period, is_qzone=True, persona_name=persona_name) 
+            logger.info(f"[DailySharing]{' ['+persona_name+']' if persona_name else ''} QQ空间时段: {period.value}, 类型: {stype.value}")
 
-            # 获取生活上下文
-            life_ctx = await self.ctx_service.get_life_context()
+            life_ctx = await self.ctx_service.get_life_context(persona_name=persona_name)
             news_data = None
             
             # 如果是发新闻，单独获取热搜（支持手动指定源）
@@ -1357,7 +1592,7 @@ class TaskManager:
 
             logger.info("[DailySharing] 正在为QQ空间生成文案...")
             qzone_content = await self.content_service.generate(
-                stype, period, "qzone_broadcast", False, qzone_life_prompt, "", news_data, nickname="", recent_dynamics=qzone_recent_dynamics_str
+                stype, period, "qzone_broadcast", False, qzone_life_prompt, "", news_data, nickname="", recent_dynamics=qzone_recent_dynamics_str, persona_name=persona_name
             )
             
             if not qzone_content:
@@ -1373,8 +1608,16 @@ class TaskManager:
             qzone_images = []
             target_local_img = None
             
-            enable_img_qzone = self.qzone_conf.get("qzone_enable_image", False)
-            enable_img_global = self.image_conf.get("enable_ai_image", False)
+            enable_img_qzone = self.plugin.get_persona_config_value(persona_name, "persona_qzone_conf", "enable_qzone", None)
+            if enable_img_qzone is None:
+                enable_img_qzone = self.qzone_conf.get("qzone_enable_image", False)
+            else:
+                enable_img_qzone = self.plugin.get_persona_config_value(persona_name, "persona_qzone_conf", "qzone_enable_image", None)
+                if enable_img_qzone is None:
+                    enable_img_qzone = self.qzone_conf.get("qzone_enable_image", False)
+            enable_img_global = self.plugin.get_persona_config_value(persona_name, "persona_image_conf", "enable_ai_image", None)
+            if enable_img_global is None:
+                enable_img_global = self.image_conf.get("enable_ai_image", False)
             
             # 获取QQ空间配图允许类型，如果没配置，默认复用群聊分享的配置
             qzone_img_allowed_types = self.qzone_conf.get(
@@ -1386,7 +1629,7 @@ class TaskManager:
                 if stype.value in qzone_img_allowed_types:
                     logger.info("[DailySharing] 正在为QQ空间生成配图...")
                     try:
-                        new_img_path = await self.image_service.generate_image(clean_qzone_content, stype, life_ctx)
+                        new_img_path = await self.image_service.generate_image(clean_qzone_content, stype, life_ctx, persona_name=persona_name)
                         if new_img_path:
                             target_local_img = new_img_path
                     except Exception as e:
@@ -1441,7 +1684,8 @@ class TaskManager:
                     target_id="qzone_broadcast",
                     sharing_type=stype.value,
                     content=clean_qzone_content[:100] + "...",
-                    success=True
+                    success=True,
+                    persona_name=persona_name or ""
                 )
                 
                 if event:

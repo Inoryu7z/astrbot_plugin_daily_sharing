@@ -1,4 +1,258 @@
 {
+  "personas": {
+    "description": "🎭 多人格配置",
+    "type": "template_list",
+    "hint": "为每个人格配置独立的分享参数。未配置的项将自动回退到全局设置。至少添加一个人格才能启用多人格模式。",
+    "templates": {
+      "persona": {
+        "items": {
+          "persona_name": {
+            "description": "人格标识",
+            "type": "string",
+            "default": "",
+            "hint": "选择要绑定的AstrBot人格，该人格的分享将使用此模板的配置",
+            "_special": "select_persona"
+          },
+          "enabled": {
+            "description": "启用此人格的分享",
+            "type": "bool",
+            "default": true,
+            "hint": "关闭后该人格不会自动分享，但手动触发仍可用"
+          },
+          "persona_receiver": {
+            "title": "分享目标",
+            "description": "该人格的独立分享目标",
+            "type": "object",
+            "hint": "留空则回退到全局 receiver 配置",
+            "items": {
+              "adapter_id": {
+                "title": "目标适配器ID",
+                "type": "string",
+                "default": "",
+                "hint": "留空则自动发现或回退到全局配置"
+              },
+              "groups": {
+                "title": "群聊独立配置",
+                "type": "list",
+                "items": {"type": "string"},
+                "description": "分享到群聊",
+                "default": [],
+                "hint": "格式同全局 receiver.groups"
+              },
+              "users": {
+                "title": "私聊独立配置",
+                "type": "list",
+                "items": {"type": "string"},
+                "description": "分享到私聊",
+                "default": [],
+                "hint": "格式同全局 receiver.users"
+              }
+            }
+          },
+          "persona_basic_conf": {
+            "description": "⏰ 基础设置",
+            "type": "object",
+            "hint": "该人格的独立基础设置，留空回退全局",
+            "items": {
+              "sharing_type": {
+                "description": "分享类型策略",
+                "type": "string",
+                "default": "",
+                "options": ["", "auto", "greeting", "news", "mood", "life_moment", "rant", "dream", "recommendation"],
+                "hint": "留空回退全局"
+              },
+              "random_periods": {
+                "description": "随机分享时间段",
+                "type": "list",
+                "items": {"type": "string"},
+                "default": [],
+                "hint": "留空回退全局。格式：HH:MM-HH:MM"
+              },
+              "dawn_sequence": {"description": "【序列】凌晨", "type": "list", "items": {"type": "string"}, "default": [], "hint": "留空回退全局"},
+              "morning_sequence": {"description": "【序列】早晨", "type": "list", "items": {"type": "string"}, "default": [], "hint": "留空回退全局"},
+              "forenoon_sequence": {"description": "【序列】上午", "type": "list", "items": {"type": "string"}, "default": [], "hint": "留空回退全局"},
+              "afternoon_sequence": {"description": "【序列】下午", "type": "list", "items": {"type": "string"}, "default": [], "hint": "留空回退全局"},
+              "evening_sequence": {"description": "【序列】傍晚", "type": "list", "items": {"type": "string"}, "default": [], "hint": "留空回退全局"},
+              "night_sequence": {"description": "【序列】夜晚", "type": "list", "items": {"type": "string"}, "default": [], "hint": "留空回退全局"},
+              "late_night_sequence": {"description": "【序列】深夜", "type": "list", "items": {"type": "string"}, "default": [], "hint": "留空回退全局"}
+            }
+          },
+          "persona_llm_conf": {
+            "description": "🤖 模型与人设",
+            "type": "object",
+            "hint": "该人格的独立模型配置，留空回退全局",
+            "items": {
+              "llm_provider_id": {
+                "description": "LLM提供商",
+                "type": "string",
+                "default": "",
+                "hint": "留空回退全局",
+                "_special": "select_provider"
+              },
+              "llm_timeout": {
+                "description": "生成超时(秒)",
+                "type": "int",
+                "default": 0,
+                "hint": "0表示回退全局"
+              },
+              "use_persona": {
+                "description": "融合人设特征",
+                "type": "string",
+                "default": "",
+                "hint": "留空回退全局，true/false"
+              },
+              "persona_id": {
+                "description": "指定人设ID",
+                "type": "string",
+                "default": "",
+                "hint": "留空则使用当前人格对应的人设",
+                "_special": "select_persona"
+              }
+            }
+          },
+          "persona_image_conf": {
+            "description": "🎨 配图与视频",
+            "type": "object",
+            "hint": "该人格的独立配图配置，留空回退全局",
+            "items": {
+              "enable_ai_image": {
+                "description": "启用生成配图",
+                "type": "string",
+                "default": "",
+                "hint": "留空回退全局，true/false"
+              },
+              "image_enabled_types": {
+                "description": "允许配图的类型",
+                "type": "list",
+                "items": {"type": "string"},
+                "default": [],
+                "hint": "留空回退全局"
+              },
+              "enable_ai_video": {
+                "description": "启用生成视频",
+                "type": "string",
+                "default": "",
+                "hint": "留空回退全局，true/false"
+              }
+            }
+          },
+          "persona_tts_conf": {
+            "description": "🗣️ 语音设置",
+            "type": "object",
+            "hint": "该人格的独立TTS配置，留空回退全局",
+            "items": {
+              "enable_tts": {
+                "description": "启用语音转换",
+                "type": "string",
+                "default": "",
+                "hint": "留空回退全局，true/false"
+              },
+              "tts_enabled_types": {
+                "description": "允许语音的类型",
+                "type": "list",
+                "items": {"type": "string"},
+                "default": [],
+                "hint": "留空回退全局"
+              }
+            }
+          },
+          "persona_qzone_conf": {
+            "description": "🌟 QQ空间说说",
+            "type": "object",
+            "hint": "该人格的独立QQ空间配置，留空回退全局",
+            "items": {
+              "enable_qzone": {
+                "description": "启用定时分享说说",
+                "type": "string",
+                "default": "",
+                "hint": "留空回退全局，true/false"
+              },
+              "qzone_sharing_type": {
+                "description": "说说分享模式",
+                "type": "string",
+                "default": "",
+                "options": ["", "auto", "greeting", "news", "mood", "life_moment", "rant", "dream", "recommendation"],
+                "hint": "留空回退全局"
+              },
+              "qzone_random_periods": {
+                "description": "说说随机触发时间段",
+                "type": "list",
+                "items": {"type": "string"},
+                "default": [],
+                "hint": "留空回退全局"
+              },
+              "qzone_enable_image": {
+                "description": "启用说说配图",
+                "type": "string",
+                "default": "",
+                "hint": "留空回退全局，true/false"
+              },
+              "qzone_dawn_sequence": {"description": "【序列】凌晨", "type": "list", "items": {"type": "string"}, "default": [], "hint": "留空回退全局"},
+              "qzone_morning_sequence": {"description": "【序列】早晨", "type": "list", "items": {"type": "string"}, "default": [], "hint": "留空回退全局"},
+              "qzone_forenoon_sequence": {"description": "【序列】上午", "type": "list", "items": {"type": "string"}, "default": [], "hint": "留空回退全局"},
+              "qzone_afternoon_sequence": {"description": "【序列】下午", "type": "list", "items": {"type": "string"}, "default": [], "hint": "留空回退全局"},
+              "qzone_evening_sequence": {"description": "【序列】傍晚", "type": "list", "items": {"type": "string"}, "default": [], "hint": "留空回退全局"},
+              "qzone_night_sequence": {"description": "【序列】夜晚", "type": "list", "items": {"type": "string"}, "default": [], "hint": "留空回退全局"},
+              "qzone_late_night_sequence": {"description": "【序列】深夜", "type": "list", "items": {"type": "string"}, "default": [], "hint": "留空回退全局"}
+            }
+          },
+          "persona_context_conf": {
+            "description": "🧠 上下文与记忆",
+            "type": "object",
+            "hint": "该人格的独立上下文配置，留空回退全局",
+            "items": {
+              "enable_life_context": {
+                "description": "启用生活上下文",
+                "type": "string",
+                "default": "",
+                "hint": "留空回退全局，true/false"
+              },
+              "group_share_schedule": {
+                "description": "启用群聊展示日程细节",
+                "type": "string",
+                "default": "",
+                "hint": "留空回退全局，true/false"
+              },
+              "reference_history_count": {
+                "description": "参考历史动态数",
+                "type": "int",
+                "default": -1,
+                "hint": "-1表示回退全局"
+              }
+            }
+          },
+          "persona_news_conf": {
+            "description": "📰 新闻热搜",
+            "type": "object",
+            "hint": "该人格的独立新闻配置，留空回退全局",
+            "items": {
+              "news_random_mode": {
+                "description": "新闻热搜源模式",
+                "type": "string",
+                "default": "",
+                "options": ["", "fixed", "random", "config", "time_based"],
+                "hint": "留空回退全局"
+              },
+              "news_random_sources": {
+                "description": "随机新闻热搜源列表",
+                "type": "list",
+                "items": {"type": "string"},
+                "default": [],
+                "hint": "留空回退全局"
+              },
+              "news_api_source": {
+                "description": "固定新闻热搜源",
+                "type": "string",
+                "default": "",
+                "options": ["", "zhihu", "weibo", "bili", "xiaohongshu", "douyin", "toutiao", "baidu", "tencent", "quark", "36kr", "51cto", "acfun", "ifanr", "netease", "sina", "thepaper", "yicai"],
+                "hint": "留空回退全局"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
   "enable_auto_sharing": {
     "description": "启用自动分享",
     "type": "bool",

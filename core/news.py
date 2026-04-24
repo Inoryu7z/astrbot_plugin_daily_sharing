@@ -21,12 +21,26 @@ class NewsService:
         elif 19 <= hour < 22: return TimePeriod.NIGHT
         else: return TimePeriod.LATE_NIGHT
 
-    def select_news_source(self, excluded_source: str = None) -> str:
-        """选择主新闻源"""
+    def select_news_source(self, excluded_source: str = None, persona_name: str = None) -> str:
         mode = self.conf.get("news_random_mode", "config")
+
+        if persona_name:
+            try:
+                persona_mode = self.plugin.get_persona_config_value(persona_name, "persona_news_conf", "news_random_mode", None)
+                if persona_mode:
+                    mode = persona_mode
+            except Exception:
+                pass
         
         if mode == "fixed": 
             source = self.conf.get("news_api_source", "zhihu")
+            if persona_name:
+                try:
+                    persona_source = self.plugin.get_persona_config_value(persona_name, "persona_news_conf", "news_api_source", None)
+                    if persona_source:
+                        source = persona_source
+                except Exception:
+                    pass
             logger.debug(f"[新闻] 固定模式: {source}")
             return source
         elif mode == "random": 
@@ -38,10 +52,16 @@ class NewsService:
             return source
         elif mode == "config":
             c = self.conf.get("news_random_sources", ["zhihu", "weibo"])
+            if persona_name:
+                try:
+                    persona_sources = self.plugin.get_persona_config_value(persona_name, "persona_news_conf", "news_random_sources", None)
+                    if persona_sources:
+                        c = persona_sources
+                except Exception:
+                    pass
             valid = [s for s in c if s in NEWS_SOURCE_MAP]
             if not valid: valid = ["zhihu"] 
             
-            # 去重逻辑
             if excluded_source and excluded_source in valid and len(valid) > 1:
                 valid.remove(excluded_source)
                 

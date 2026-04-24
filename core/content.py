@@ -62,10 +62,8 @@ class ContentService:
     async def generate(self, stype: SharingType, period: TimePeriod, 
                       target_id: str, is_group: bool, 
                       life_ctx: str, chat_hist: str, news_data: tuple = None,
-                      nickname: str = "", recent_dynamics: str = "") -> Optional[str]:
-        """统一生成入口"""
-        # 获取人设信息
-        persona_info = await self._get_persona_info()
+                      nickname: str = "", recent_dynamics: str = "", persona_name: str = None) -> Optional[str]:
+        persona_info = await self._get_persona_info(persona_name=persona_name)
         
         # 区分【亲昵称呼】和【网名昵称】
         detect_name = nickname  
@@ -90,7 +88,8 @@ class ContentService:
             "time_str": time_str,
             "nickname": call_name,      
             "detect_name": detect_name,
-            "recent_dynamics": recent_dynamics
+            "recent_dynamics": recent_dynamics,
+            "persona_name": persona_name
         }
         
         try:
@@ -193,17 +192,34 @@ class ContentService:
         }
         return labels.get(period, "现在")
 
-    async def _get_persona_info(self) -> dict:
-        """获取人设详细信息（包括系统提示词和对用户的称呼）"""
+    async def _get_persona_info(self, persona_name: str = None) -> dict:
         info = {"prompt": "", "bot_name": "", "user_name": ""}
         try:
-            persona_id = self.llm_conf.get("persona_id", "")
+            persona_id = ""
+            if persona_name:
+                persona_id = self.plugin.get_persona_config_value(persona_name, "persona_llm_conf", "persona_id", "")
+            if not persona_id:
+                persona_id = self.llm_conf.get("persona_id", "")
+
+            if persona_name and not persona_id:
+                try:
+                    persona_mgr = getattr(self.context, "persona_manager", None)
+                    if persona_mgr:
+                        persona_obj = await persona_mgr.get_persona(persona_name)
+                        if persona_obj:
+                            info["prompt"] = getattr(persona_obj, "system_prompt", "")
+                            info["bot_name"] = getattr(persona_obj, "bot_name", "")
+                            info["user_name"] = getattr(persona_obj, "user_name", "")
+                            return info
+                except Exception:
+                    pass
+
             if persona_id:
                 persona = await self.context.persona_manager.get_persona(persona_id)
                 if persona:
                     info["prompt"] = getattr(persona, "system_prompt", "")
-                    info["bot_name"] = getattr(persona, "bot_name", "")
-                    info["user_name"] = getattr(persona, "user_name", "")
+                    info["bot_name"] = getattr(persona_obj, "bot_name", "") if persona_obj else getattr(persona, "bot_name", "")
+                    info["user_name"] = getattr(persona_obj, "user_name", "") if persona_obj else getattr(persona, "user_name", "")
                     return info
 
             personality = await self.context.persona_manager.get_default_persona_v3()
@@ -694,7 +710,7 @@ class ContentService:
             self._dayflow_not_found = True
         return None
 
-    async def _get_daymind_mood(self) -> dict:
+    async def _get_daymind_mood(self, persona_name: str = None) -> dict:
         plugin = self._find_daymind_plugin()
         if not plugin:
             return {}
@@ -702,44 +718,46 @@ class ContentService:
             scheduler = getattr(plugin, "scheduler", None)
             if not scheduler:
                 return {}
-            persona_name = ""
-            try:
-                persona_mgr = getattr(self.context, "persona_manager", None)
-                if persona_mgr and hasattr(persona_mgr, "get_default_persona_v3"):
-                    persona_obj = await persona_mgr.get_default_persona_v3()
-                    if isinstance(persona_obj, dict):
-                        persona_name = persona_obj.get("name", "") or persona_obj.get("persona_id", "")
-                    elif persona_obj:
-                        persona_name = getattr(persona_obj, "name", "") or getattr(persona_obj, "persona_id", "")
-            except Exception:
-                pass
-            if not persona_name:
+            resolved_name = persona_name
+            if not resolved_name:
+                try:
+                    persona_mgr = getattr(self.context, "persona_manager", None)
+                    if persona_mgr and hasattr(persona_mgr, "get_default_persona_v3"):
+                        persona_obj = await persona_mgr.get_default_persona_v3()
+                        if isinstance(persona_obj, dict):
+                            resolved_name = persona_obj.get("name", "") or persona_obj.get("persona_id", "")
+                        elif persona_obj:
+                            resolved_name = getattr(persona_obj, "name", "") or getattr(persona_obj, "persona_id", "")
+                except Exception:
+                    pass
+            if not resolved_name:
                 return {}
-            mood_data = scheduler.get_current_mood_for_persona(persona_name)
+            mood_data = scheduler.get_current_mood_for_persona(resolved_name)
             if mood_data:
-                logger.info(f"[内容服务] DayMind 心情: {mood_data.get('label', '?')} - {mood_data.get('reason', '?')}")
+                logger.info(f"[内容服务] DayMind 心情 [{resolved_name}]: {mood_data.get('label', '?')} - {mood_data.get('reason', '?')}")
             return mood_data or {}
         except Exception as e:
             logger.debug(f"[内容服务] 获取 DayMind 心情失败: {e}")
             return {}
 
-    async def _get_dayflow_timeline_now(self) -> dict:
+    async def _get_dayflow_timeline_now(self, persona_name: str = None) -> dict:
         plugin = self._find_dayflow_plugin()
         if not plugin:
             return {}
         try:
-            persona_name = ""
-            try:
-                persona_mgr = getattr(self.context, "persona_manager", None)
-                if persona_mgr and hasattr(persona_mgr, "get_default_persona_v3"):
-                    persona_obj = await persona_mgr.get_default_persona_v3()
-                    if isinstance(persona_obj, dict):
-                        persona_name = persona_obj.get("name", "") or persona_obj.get("persona_id", "")
-                    elif persona_obj:
-                        persona_name = getattr(persona_obj, "name", "") or getattr(persona_obj, "persona_id", "")
-            except Exception:
-                pass
-            data = await plugin.get_life_context(persona_name=persona_name if persona_name else None)
+            resolved_name = persona_name
+            if not resolved_name:
+                try:
+                    persona_mgr = getattr(self.context, "persona_manager", None)
+                    if persona_mgr and hasattr(persona_mgr, "get_default_persona_v3"):
+                        persona_obj = await persona_mgr.get_default_persona_v3()
+                        if isinstance(persona_obj, dict):
+                            resolved_name = persona_obj.get("name", "") or persona_obj.get("persona_id", "")
+                        elif persona_obj:
+                            resolved_name = getattr(persona_obj, "name", "") or getattr(persona_obj, "persona_id", "")
+                except Exception:
+                    pass
+            data = await plugin.get_life_context(persona_name=resolved_name if resolved_name else None)
             if not data or not isinstance(data, dict):
                 return {}
             timeline = data.get("timeline", [])
@@ -774,7 +792,7 @@ class ContentService:
 
     # ==================== 梦境分享 ====================
 
-    async def _get_daymind_dreams(self) -> dict:
+    async def _get_daymind_dreams(self, persona_name: str = None) -> dict:
         plugin = self._find_daymind_plugin()
         if not plugin:
             return {}
@@ -782,27 +800,28 @@ class ContentService:
             scheduler = getattr(plugin, "scheduler", None)
             if not scheduler:
                 return {}
-            persona_name = ""
-            try:
-                persona_mgr = getattr(self.context, "persona_manager", None)
-                if persona_mgr and hasattr(persona_mgr, "get_default_persona_v3"):
-                    persona_obj = await persona_mgr.get_default_persona_v3()
-                    if isinstance(persona_obj, dict):
-                        persona_name = persona_obj.get("name", "") or persona_obj.get("persona_id", "")
-                    elif persona_obj:
-                        persona_name = getattr(persona_obj, "name", "") or getattr(persona_obj, "persona_id", "")
-            except Exception:
-                pass
-            if not persona_name:
+            resolved_name = persona_name
+            if not resolved_name:
+                try:
+                    persona_mgr = getattr(self.context, "persona_manager", None)
+                    if persona_mgr and hasattr(persona_mgr, "get_default_persona_v3"):
+                        persona_obj = await persona_mgr.get_default_persona_v3()
+                        if isinstance(persona_obj, dict):
+                            resolved_name = persona_obj.get("name", "") or persona_obj.get("persona_id", "")
+                        elif persona_obj:
+                            resolved_name = getattr(persona_obj, "name", "") or getattr(persona_obj, "persona_id", "")
+                except Exception:
+                    pass
+            if not resolved_name:
                 return {}
 
             from datetime import date, timedelta
             yesterday = (date.today() - timedelta(days=1)).isoformat()
             today = date.today().isoformat()
 
-            dreams = scheduler.get_dream_history(persona_name, date=yesterday)
+            dreams = scheduler.get_dream_history(resolved_name, date=yesterday)
             if not dreams:
-                dreams = scheduler.get_dream_history(persona_name, date=today)
+                dreams = scheduler.get_dream_history(resolved_name, date=today)
             if not dreams:
                 return {}
 
@@ -832,7 +851,7 @@ class ContentService:
             address_rule = '【重要：私聊模式】像跟朋友说"我昨晚做了个梦"那样自然。'
             user_info_prompt = self._build_user_prompt(call_name, detect_name)
 
-        dream_data = await self._get_daymind_dreams()
+        dream_data = await self._get_daymind_dreams(persona_name=ctx.get("persona_name"))
 
         if not dream_data or not dream_data.get("dreams"):
             return await self._gen_mood(period, ctx)
@@ -924,8 +943,8 @@ class ContentService:
             address_rule = "【重要：私聊模式】严禁使用'大家'、'你们'。像跟朋友随口说一句那样自然。"
             user_info_prompt = self._build_user_prompt(call_name, detect_name)
 
-        daymind_mood = await self._get_daymind_mood()
-        dayflow_data = await self._get_dayflow_timeline_now()
+        daymind_mood = await self._get_daymind_mood(persona_name=ctx.get("persona_name"))
+        dayflow_data = await self._get_dayflow_timeline_now(persona_name=ctx.get("persona_name"))
 
         mood_hint = ""
         if daymind_mood:
@@ -1014,8 +1033,8 @@ class ContentService:
             address_rule = "【重要：私聊模式】像跟朋友吐槽一样，不需要'大家'、'你们'。"
             user_info_prompt = self._build_user_prompt(call_name, detect_name)
 
-        daymind_mood = await self._get_daymind_mood()
-        dayflow_data = await self._get_dayflow_timeline_now()
+        daymind_mood = await self._get_daymind_mood(persona_name=ctx.get("persona_name"))
+        dayflow_data = await self._get_dayflow_timeline_now(persona_name=ctx.get("persona_name"))
 
         mood_hint = ""
         if daymind_mood:

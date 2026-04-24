@@ -284,23 +284,20 @@ class ContextService:
     
     # ==================== 生活上下文 (Life Scheduler) ====================
     
-    async def get_life_context(self) -> Optional[str]:
-        """获取生活上下文 (支持解析 JSON 数据)"""
+    async def get_life_context(self, persona_name: str = None) -> Optional[str]:
         if not self.life_conf.get("enable_life_context", True): 
             return None
             
         if not self._life_plugin: 
-            # 尝试用 "life_scheduler" 关键字查找
             self._life_plugin = self._find_plugin("life_scheduler")
         
         plugin = self._life_plugin
         if not plugin:
             return None
 
-        # 调用插件接口
         if hasattr(plugin, 'get_life_context'):
             try: 
-                raw_data = await plugin.get_life_context()
+                raw_data = await plugin.get_life_context(persona_name=persona_name)
                 
                 if isinstance(raw_data, dict):
                     return self._parse_life_data(raw_data)
