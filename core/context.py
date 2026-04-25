@@ -18,9 +18,10 @@ except ImportError:
     HAS_NEW_MESSAGE_API = False
 
 class ContextService:
-    def __init__(self, context_obj, config):
+    def __init__(self, context_obj, config, plugin=None):
         self.context = context_obj
         self.config = config
+        self.plugin = plugin
         self.bot_map = {} 
 
         self._life_plugin = None

@@ -42,6 +42,20 @@ class TaskManager:
                     continue
                 canonical = self.plugin._canonical_persona_name(pname) or pname
                 self._setup_persona_tasks(canonical, persona_entry)
+
+            if self.plugin.config.get("enable_auto_sharing", False):
+                has_global_targets = bool(self.receiver_conf.get("groups") or self.receiver_conf.get("users"))
+                if has_global_targets:
+                    trigger_mode = self.basic_conf.get("trigger_mode", "random_period")
+                    if trigger_mode == "cron":
+                        cron = self.basic_conf.get("sharing_cron", "0 8,20 * * *")
+                        self.setup_cron(cron, persona_name=None)
+                    else:
+                        daily_sched_id = "daily_random_scheduler"
+                        self._setup_cron_job_custom(daily_sched_id, "0 0 * * *", self._make_persona_daily_random_scheduler(None))
+                        asyncio.create_task(self._make_persona_daily_random_scheduler(None)())
+                    self.setup_custom_target_crons(persona_name=None)
+                    logger.debug(f"[DailySharing] 全局分享任务已启动 (与人格任务并行, 模式: {trigger_mode})")
         else:
             if self.plugin.config.get("enable_auto_sharing", False):
                 trigger_mode = self.basic_conf.get("trigger_mode", "random_period")

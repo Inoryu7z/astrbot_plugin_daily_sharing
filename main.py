@@ -71,7 +71,7 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
         self.db = DatabaseManager(self.data_dir)
         
         # 初始化服务层
-        self.ctx_service = ContextService(context, config)
+        self.ctx_service = ContextService(context, config, self)
         self.news_service = NewsService(config, self)
         self.image_service = ImageService(context, config, self._call_llm_wrapper)
         

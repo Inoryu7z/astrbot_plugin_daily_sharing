@@ -1,3 +1,11 @@
+### v5.5.7
+**🐛 修复 ContextService 崩溃 + 全局分享任务不启动**
+
+*   修复 `ContextService` 缺少 `plugin` 属性导致 `AttributeError: 'ContextService' object has no attribute 'plugin'`，生活上下文格式化时崩溃
+*   修复多人格模式下全局分享任务不启动：当存在人格配置时，全局配置的分享任务被跳过，导致全局人格永远不分享
+*   `ContextService.__init__` 新增 `plugin` 参数，`main.py` 创建时传入插件实例
+*   `setup_tasks()` 在遍历人格条目后，额外检查并启动全局分享任务（与人格任务并行）
+
 ### v5.5.6
 **✨ 人格配置默认值预填充**
 
