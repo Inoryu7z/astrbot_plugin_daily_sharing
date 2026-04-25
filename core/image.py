@@ -168,10 +168,13 @@ class ImageService:
 
 【提取要求】
 1. **主体 (subject)**：【最重要】画面的核心物体描述（例如：精致的荷花酥，一杯牛奶或者一本封皮复古的书）。如果是纯风景或画人，此项填"无"。
-2. **环境 (environment)**：根据逻辑确定的具体地点。
+2. **环境 (environment)**：根据逻辑确定的具体地点。注意：环境只是背景，不要过度展开描述，避免抢夺画面主体。
 3. **光影 (lighting)**：参考时间段[{time_hint}]。如果是室内，强调人造光；如果是室外，强调自然天气氛围。
 4. **穿搭 (outfit)**：{outfit_hint} 请明确区分"内搭"和"外穿"层次。
 5. **动作 (action)**：人物动作。
+
+【构图要求】
+这是一张自拍/生活照，人物必须占据画面的主要部分。环境是背景，不是主体。环境描述要简洁，只写最必要的场景定位，不要写环境细节。
 
 请严格输出 JSON 格式：
 {{
@@ -246,31 +249,31 @@ class ImageService:
             parts.append("特写自拍，情绪表达，景深效果")
         elif sharing_type == SharingType.NEWS:
             if not action and not has_subj:
-                parts.append("中景生活快照，看手机或屏幕")
+                parts.append("半身生活快照，看手机或屏幕")
             else:
-                parts.append("中景生活快照")
+                parts.append("半身生活快照")
         elif sharing_type == SharingType.LIFE_MOMENT:
             if not action and not has_subj:
-                parts.append("随手拍风格，生活感，自然不做作")
+                parts.append("半身随手拍，生活感，自然不做作")
             else:
-                parts.append("生活快照，随意角度")
+                parts.append("半身生活快照，随意角度")
         elif sharing_type == SharingType.RANT:
             if not action and not has_subj:
-                parts.append("自拍，无奈表情，生活场景")
+                parts.append("半身自拍，无奈表情，生活场景")
             else:
-                parts.append("中景，带点情绪的姿态")
+                parts.append("半身，带点情绪的姿态")
         elif sharing_type == SharingType.DREAM:
             if not action and not has_subj:
                 parts.append("半身自拍，若有所思的表情，柔和室内光")
             else:
-                parts.append("中景生活照，自然姿态")
+                parts.append("半身生活照，自然姿态")
         elif sharing_type == SharingType.RECOMMENDATION:
             if not action and not has_subj:
-                parts.append("中景，展示物品，手部特写")
+                parts.append("半身，展示物品，手部特写")
             else:
-                parts.append("中景，聚焦物体")
+                parts.append("半身，聚焦物体")
         else:
-            parts.append("中景自然姿态自拍")
+            parts.append("半身自然姿态自拍")
 
         env = visuals.get("environment", "")
         if env:
@@ -300,6 +303,95 @@ class ImageService:
 
     # ==================== 3. 工具函数 ====================
 
+    async def _analyze_image_for_video(self, image_path: str, content: str) -> str:
+        """使用多模态LLM分析图片内容，生成针对性的视频提示词"""
+        try:
+            # 将图片转为base64或获取URL
+            image_url = self._get_image_url_for_llm(image_path)
+            if not image_url:
+                logger.warning("[DailySharing] 无法获取图片URL，使用默认视频提示词")
+                return self._get_default_video_prompt()
+
+            custom_prompt = self.config.get("video_director_prompt", "").strip()
+            if custom_prompt:
+                system_prompt = custom_prompt
+            else:
+                system_prompt = self._get_default_video_director_prompt()
+
+            user_prompt = "请描述这张照片变成视频后的动态效果。"
+
+            logger.info("[DailySharing] 正在使用多模态模型分析图片内容...")
+
+            # 调用多模态LLM
+            resp = await self.call_llm(
+                prompt=user_prompt,
+                system_prompt=system_prompt,
+                timeout=30,
+                image_urls=[image_url]
+            )
+
+            if resp and len(resp) > 10:
+                # 清理可能的引号或多余格式
+                video_prompt = resp.strip().strip('"').strip("'")
+                logger.info(f"[DailySharing] AI生成的视频提示词: {video_prompt[:80]}...")
+                return video_prompt
+            else:
+                logger.warning("[DailySharing] 多模态模型返回空或无效内容，使用默认提示词")
+                return self._get_default_video_prompt()
+
+        except Exception as e:
+            logger.warning(f"[DailySharing] 图片分析失败: {e}，使用默认提示词")
+            return self._get_default_video_prompt()
+
+    def _get_image_url_for_llm(self, image_path: str) -> Optional[str]:
+        """将本地图片路径转为LLM可用的URL格式"""
+        try:
+            # 尝试使用file_token_service获取URL
+            if hasattr(self.context, 'file_token_service'):
+                fts = self.context.file_token_service
+                if fts and hasattr(fts, 'generate_file_token'):
+                    # 生成文件token并返回URL
+                    token = fts.generate_file_token(image_path)
+                    if token:
+                        return f"file_token://{token}"
+
+            # 备选：尝试使用base64
+            import base64
+            with open(image_path, "rb") as f:
+                image_bytes = f.read()
+            ext = os.path.splitext(image_path)[1].lower().replace(".", "")
+            if ext in ["jpg", "jpeg"]:
+                mime = "image/jpeg"
+            elif ext == "png":
+                mime = "image/png"
+            elif ext == "webp":
+                mime = "image/webp"
+            else:
+                mime = "image/jpeg"
+            b64 = base64.b64encode(image_bytes).decode("utf-8")
+            return f"data:{mime};base64,{b64}"
+        except Exception as e:
+            logger.debug(f"[DailySharing] 获取图片URL失败: {e}")
+            return None
+
+    def _get_default_video_prompt(self) -> str:
+        """获取默认视频提示词（兼容旧逻辑）"""
+        base = self._last_image_description or "生活片段"
+        return f"{base}, 生活片段, 电影感运镜, 缓慢平移, 高质量"
+
+    def _get_default_video_director_prompt(self) -> str:
+        return """你是一个视频动效设计师。用户会给你一张美少女的生活照，你需要描述这张照片变成5秒视频后的动态效果。
+
+只输出动态描述，不要任何解释或格式标记。5秒视频，只写微小自然的动态，不要大幅度动作或场景切换。
+
+输出必须以"参考图片中的少女形象，她"开头，然后依次描述以下内容，用逗号连接：
+1. 她在画面中的姿态和正在做的事
+2. 她身上最打动人的细节动起来——必须基于图片实际内容，突出她的可爱、魅力或者性感
+3. 背景环境中自然发生的动态变化（风吹、水动、物品晃动等）
+4. 适合当前构图的运镜方式
+5. 光线或色彩的微妙变化
+以"电影感，高质量，流畅"结尾。"""
+
     async def generate_video_from_image(self, image_path: str, content: str) -> Optional[str]:
         if not self.img_conf.get("enable_ai_video", False): return None
 
@@ -315,7 +407,12 @@ class ImageService:
             with open(image_path, "rb") as f: image_bytes = f.read()
             logger.info(f"[DailySharing] 正在将配图转换为视频...")
 
-            video_prompt = f"{self._last_image_description}, 生活片段, 电影感运镜, 缓慢平移, 高质量"
+            # 判断是否启用智能视频提示词
+            if self.img_conf.get("enable_smart_video_prompt", True):
+                video_prompt = await self._analyze_image_for_video(image_path, content)
+            else:
+                video_prompt = self._get_default_video_prompt()
+                logger.info(f"[DailySharing] 使用默认视频提示词: {video_prompt[:80]}...")
 
             if hasattr(self._aiimg_plugin, "_get_video_chain"):
                 chain = self._aiimg_plugin._get_video_chain()

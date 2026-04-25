@@ -260,8 +260,8 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
         except Exception as e:
             logger.error(f"[DailySharing] 保存配置失败: {e}")
 
-    async def _call_llm_wrapper(self, prompt: str, system_prompt: str = None, timeout: int = 60, max_retries: int = 2, tools: list = None, persona_name: str = None) -> Optional[str]:
-        """LLM 调用包装器（支持失败重试与自动降级）"""
+    async def _call_llm_wrapper(self, prompt: str, system_prompt: str = None, timeout: int = 60, max_retries: int = 2, tools: list = None, persona_name: str = None, image_urls: list = None) -> Optional[str]:
+        """LLM 调用包装器（支持失败重试与自动降级，支持图片输入）"""
         if self._is_terminated: return None
         
         def _get_system_default_provider() -> str:
@@ -312,6 +312,8 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
                     kwargs["chat_provider_id"] = current_provider_id
                 if tools:
                     kwargs["func_tool_names"] = tools
+                if image_urls:
+                    kwargs["image_urls"] = image_urls
 
                 resp = await asyncio.wait_for(
                     self.context.llm_generate(**kwargs),

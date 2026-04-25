@@ -1065,6 +1065,12 @@
         "default": false,
         "hint": "需要 astrbot_plugin_gitee_aiimg 插件配置Grok，将配图转换为视频"
       },
+      "enable_smart_video_prompt": {
+        "description": "启用智能视频提示词",
+        "type": "bool",
+        "default": true,
+        "hint": "使用多模态模型分析图片内容，生成针对性的视频提示词（需要配置支持识图的LLM）"
+      },
       "video_enabled_types": {
         "description": "允许视频的类型",
         "type": "list",
@@ -1389,5 +1395,15 @@
     "editor_language": "markdown",
     "editor_theme": "vs-dark",
     "default": "你是一个专业的 AI 绘画视觉导演。\n\n任务：根据用户的【分享文案】和【生活日程】，提取画面关键词。\n\n## 提取逻辑\n1. **分析主体**：首先判断文案是否在描述或推荐一个**具体物品**。\n - 如果是：该物品就是【subject】。\n - 如果否：【subject】填\"无\"。\n\n2. **分析背景**：\n{logic_prompt}\n\n3. **负向过滤**：**严禁**提取 {curr_hour}:00 之后的未来日程作为背景。\n\n## 提取要求\n1. **主体**：画面核心物体。\n2. **环境**：具体地点。\n3. **光影**：参考时间段[{time_hint}]。\n4. **穿搭**：{outfit_hint}\n5. **动作**：人物动作。\n\n请严格输出 JSON 格式：\n{{\n \"subject\": \"...\",\n \"environment\": \"...\",\n \"lighting\": \"...\",\n \"outfit\": \"...\",\n \"action\": \"...\",\n \"weather_vibe\": \"...\"\n}}"
+  },
+  "video_director_prompt": {
+    "description": "视频动效提示词模板",
+    "hint": "识图后生成视频提示词的模板。留空使用默认。模型会直接看到图片，无需在模板中传入图片描述。",
+    "type": "text",
+    "obvious_hint": true,
+    "editor_mode": true,
+    "editor_language": "markdown",
+    "editor_theme": "vs-dark",
+    "default": "你是一个视频动效设计师。用户会给你一张美少女的生活照，你需要描述这张照片变成5秒视频后的动态效果。\n\n只输出动态描述，不要任何解释或格式标记。5秒视频，只写微小自然的动态，不要大幅度动作或场景切换。\n\n输出必须以\"参考图片中的少女形象，她\"开头，然后依次描述以下内容，用逗号连接：\n1. 她在画面中的姿态和正在做的事\n2. 她身上最打动人的细节动起来——必须基于图片实际内容，突出她的可爱、魅力或者性感\n3. 背景环境中自然发生的动态变化（风吹、水动、物品晃动等）\n4. 适合当前构图的运镜方式\n5. 光线或色彩的微妙变化\n以\"电影感，高质量，流畅\"结尾。"
   }
 }
