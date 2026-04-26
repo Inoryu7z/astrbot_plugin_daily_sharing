@@ -258,6 +258,13 @@
                   "false"
                 ],
                 "hint": "需要 astrbot_plugin_gitee_aiimg 插件配置Grok，将配图转换为视频。默认与全局相同，可修改"
+              },
+              "video_llm_provider_id": {
+                "description": "视频识图LLM提供商",
+                "type": "string",
+                "default": "",
+                "hint": "用于视频识图的多模态模型。留空则使用全局配置。必须支持图片输入",
+                "_special": "select_provider"
               }
             }
           },

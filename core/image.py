@@ -308,15 +308,9 @@ class ImageService:
 
     # ==================== 3. 工具函数 ====================
 
-    async def _analyze_image_for_video(self, image_path: str, content: str) -> str:
+    async def _analyze_image_for_video(self, image_path: str, content: str, persona_name: str = None) -> str:
         """使用多模态LLM分析图片内容，生成针对性的视频提示词"""
         try:
-            # 将图片转为base64或获取URL
-            image_url = self._get_image_url_for_llm(image_path)
-            if not image_url:
-                logger.warning("[DailySharing] 无法获取图片URL，使用默认视频提示词")
-                return self._get_default_video_prompt()
-
             custom_prompt = self.config.get("video_director_prompt", "").strip()
             if custom_prompt:
                 system_prompt = custom_prompt
@@ -327,14 +321,21 @@ class ImageService:
 
             logger.info("[DailySharing] 正在使用多模态模型分析图片内容...")
 
-            video_provider_id = self.img_conf.get("video_llm_provider_id", "").strip() or None
+            # 优先级：人格级 video_llm_provider_id > 全局 video_llm_provider_id
+            video_provider_id = None
+            if persona_name:
+                persona_vid_provider = self.plugin.get_persona_config_value(persona_name, "persona_image_conf", "video_llm_provider_id", "")
+                if persona_vid_provider:
+                    video_provider_id = persona_vid_provider
+            if not video_provider_id:
+                video_provider_id = self.img_conf.get("video_llm_provider_id", "").strip() or None
 
-            # 调用多模态LLM
+            # 调用多模态LLM，直接传本地文件路径，AstrBot会自动处理编码
             resp = await self.call_llm(
                 prompt=user_prompt,
                 system_prompt=system_prompt,
                 timeout=30,
-                image_urls=[image_url],
+                image_urls=[image_path],
                 provider_id=video_provider_id
             )
 
@@ -350,37 +351,6 @@ class ImageService:
         except Exception as e:
             logger.warning(f"[DailySharing] 图片分析失败: {e}，使用默认提示词")
             return self._get_default_video_prompt()
-
-    def _get_image_url_for_llm(self, image_path: str) -> Optional[str]:
-        """将本地图片路径转为LLM可用的URL格式"""
-        try:
-            # 尝试使用file_token_service获取URL
-            if hasattr(self.context, 'file_token_service'):
-                fts = self.context.file_token_service
-                if fts and hasattr(fts, 'generate_file_token'):
-                    # 生成文件token并返回URL
-                    token = fts.generate_file_token(image_path)
-                    if token:
-                        return f"file_token://{token}"
-
-            # 备选：尝试使用base64
-            import base64
-            with open(image_path, "rb") as f:
-                image_bytes = f.read()
-            ext = os.path.splitext(image_path)[1].lower().replace(".", "")
-            if ext in ["jpg", "jpeg"]:
-                mime = "image/jpeg"
-            elif ext == "png":
-                mime = "image/png"
-            elif ext == "webp":
-                mime = "image/webp"
-            else:
-                mime = "image/jpeg"
-            b64 = base64.b64encode(image_bytes).decode("utf-8")
-            return f"data:{mime};base64,{b64}"
-        except Exception as e:
-            logger.debug(f"[DailySharing] 获取图片URL失败: {e}")
-            return None
 
     def _get_default_video_prompt(self) -> str:
         """获取默认视频提示词（兼容旧逻辑）"""
@@ -400,7 +370,7 @@ class ImageService:
 5. 光线或色彩的微妙变化
 以"电影感，高质量，流畅"结尾。"""
 
-    async def generate_video_from_image(self, image_path: str, content: str) -> Optional[str]:
+    async def generate_video_from_image(self, image_path: str, content: str, persona_name: str = None) -> Optional[str]:
         if not self.img_conf.get("enable_ai_video", False): return None
 
         self._ensure_plugin()
@@ -417,7 +387,7 @@ class ImageService:
 
             # 判断是否启用智能视频提示词
             if self.img_conf.get("enable_smart_video_prompt", True):
-                video_prompt = await self._analyze_image_for_video(image_path, content)
+                video_prompt = await self._analyze_image_for_video(image_path, content, persona_name=persona_name)
             else:
                 video_prompt = self._get_default_video_prompt()
                 logger.info(f"[DailySharing] 使用默认视频提示词: {video_prompt[:80]}...")

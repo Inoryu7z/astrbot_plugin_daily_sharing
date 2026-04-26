@@ -341,8 +341,9 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
                     return None 
 
                 if "401" in err_str:
-                    logger.error(f"[DailySharing] LLM 失败。请检查 API Key。")
-                    # 降级逻辑 2                    
+                    logger.error(f"[DailySharing] LLM 认证失败(401)，请检查 API Key。provider: {current_provider_id}")
+                    if provider_id:
+                        return None
                     if attempt < max_retries and user_provider_id and current_provider_id == user_provider_id:
                         default_pid = _get_system_default_provider()
                         if default_pid and default_pid != current_provider_id:

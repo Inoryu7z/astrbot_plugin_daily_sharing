@@ -1063,7 +1063,7 @@ class TaskManager:
                 # 生成视频 (如果明确要求视频，且图片是本地文件而非URL)
                 if img_path and self.image_conf.get("enable_ai_video", False):
                     if need_video and not img_path.startswith("http"):
-                        video_url = await self.image_service.generate_video_from_image(img_path, content)
+                        video_url = await self.image_service.generate_video_from_image(img_path, content, persona_name=persona_name)
 
             # ================= 语音生成逻辑 =================
             audio_path = None
@@ -1302,7 +1302,7 @@ class TaskManager:
                         if img_path and enable_ai_video and not img_path.startswith("http"):
                             video_allowed = self.image_conf.get("video_enabled_types", ["greeting", "mood"])
                             if stype.value in video_allowed:
-                                video_url = await self.image_service.generate_video_from_image(img_path, content)
+                                video_url = await self.image_service.generate_video_from_image(img_path, content, persona_name=persona_name)
                     else:
                          logger.info(f"[DailySharing] 当前类型 {stype.value} 不在配图允许列表，跳过配图。")
 
