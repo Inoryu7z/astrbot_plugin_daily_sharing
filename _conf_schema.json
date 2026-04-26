@@ -1071,6 +1071,13 @@
         "default": true,
         "hint": "使用多模态模型分析图片内容，生成针对性的视频提示词（需要配置支持识图的LLM）"
       },
+      "video_llm_provider_id": {
+        "description": "视频识图LLM提供商",
+        "type": "string",
+        "default": "",
+        "hint": "用于视频识图的多模态模型。留空则使用全局LLM。必须支持图片输入",
+        "_special": "select_provider"
+      },
       "video_enabled_types": {
         "description": "允许视频的类型",
         "type": "list",

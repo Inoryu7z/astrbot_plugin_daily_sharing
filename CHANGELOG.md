@@ -1,16 +1,23 @@
 ### v5.5.8
-**🎬 智能视频提示词 — AI识图生成动态视频 + 构图优化**
+**🎬 智能视频提示词 — AI识图生成动态视频 + 构图优化 + Bug修复**
 
 *   新增 `enable_smart_video_prompt` 配置项（默认开启）：使用多模态LLM识图后生成针对性的视频提示词
 *   新增 `video_director_prompt` 配置项：视频动效提示词模板，支持 WebUI 编辑器自定义
+*   新增 `video_llm_provider_id` 配置项：视频识图独立LLM，留空则用全局LLM
 *   新增 `_analyze_image_for_video()` 方法：调用多模态模型识图，生成视频动态描述
 *   新增 `_get_image_url_for_llm()` 方法：支持 file_token 和 base64 两种方式将图片传给LLM
 *   新增 `_get_default_video_prompt()` 方法：保留旧版默认提示词作为降级方案
 *   视频提示词固定以"参考图片中的少女形象，她"开头，锁定身份锚点
 *   识图失败或关闭智能提示词时，自动回退到旧版默认提示词
-*   `_call_llm_wrapper()` 新增 `image_urls` 参数，支持多模态图片输入
+*   `_call_llm_wrapper()` 新增 `image_urls` 和 `provider_id` 参数
 *   构图优化：所有分享类型的构图指令从"中景"改为"半身"，人物占比更大
 *   视觉导演提示词新增【构图要求】，约束环境描述不过度展开，避免抢夺画面主体
+*   修复：`_last_image_description` 在图片生成失败时仍被赋值，导致后续视频提示词错乱
+*   修复：新闻图片URL被传入视频生成，`os.path.exists()` 必定失败，视频静默跳过
+*   修复：`_call_aiimg_selfie` 返回 `str(None)="None"` 被当作有效文件路径
+*   修复：`send()` 在文字内容为空时丢失图片
+*   修复：`_temp_fallback_provider` 永不重置，LLM降级后无法恢复
+*   修复：视频生成仅使用 chain[0]，无降级，现在遍历所有 provider
 
 ### v5.5.7
 **🐛 修复 ContextService 崩溃 + 全局分享任务不启动**

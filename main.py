@@ -260,7 +260,7 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
         except Exception as e:
             logger.error(f"[DailySharing] 保存配置失败: {e}")
 
-    async def _call_llm_wrapper(self, prompt: str, system_prompt: str = None, timeout: int = 60, max_retries: int = 2, tools: list = None, persona_name: str = None, image_urls: list = None) -> Optional[str]:
+    async def _call_llm_wrapper(self, prompt: str, system_prompt: str = None, timeout: int = 60, max_retries: int = 2, tools: list = None, persona_name: str = None, image_urls: list = None, provider_id: str = None) -> Optional[str]:
         """LLM 调用包装器（支持失败重试与自动降级，支持图片输入）"""
         if self._is_terminated: return None
         
@@ -277,7 +277,10 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
                 pass
             return ""
 
-        if persona_name:
+        if provider_id:
+            user_provider_id = provider_id
+            config_timeout = self.llm_conf.get("llm_timeout", 60)
+        elif persona_name:
             user_provider_id = self.get_persona_config_value(persona_name, "persona_llm_conf", "llm_provider_id", "")
             persona_timeout = self.get_persona_config_value(persona_name, "persona_llm_conf", "llm_timeout", None, int_fallback_sentinel=0)
             config_timeout = persona_timeout if persona_timeout is not None else self.llm_conf.get("llm_timeout", 60)
@@ -323,6 +326,7 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
                 if resp and hasattr(resp, 'completion_text'):
                     result = resp.completion_text.strip()
                     if result:
+                        self._temp_fallback_provider = None
                         return result
                     
             except asyncio.TimeoutError:

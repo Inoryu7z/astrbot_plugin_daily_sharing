@@ -1060,9 +1060,9 @@ class TaskManager:
                 if ai_img_path:
                     img_path = ai_img_path
                 
-                # 生成视频 (如果明确要求视频)
+                # 生成视频 (如果明确要求视频，且图片是本地文件而非URL)
                 if img_path and self.image_conf.get("enable_ai_video", False):
-                    if need_video:
+                    if need_video and not img_path.startswith("http"):
                         video_url = await self.image_service.generate_video_from_image(img_path, content)
 
             # ================= 语音生成逻辑 =================
@@ -1299,7 +1299,7 @@ class TaskManager:
                         enable_ai_video = self.plugin.get_persona_config_value(persona_name, "persona_image_conf", "enable_ai_video", None)
                         if enable_ai_video is None:
                             enable_ai_video = self.image_conf.get("enable_ai_video", False)
-                        if img_path and enable_ai_video:
+                        if img_path and enable_ai_video and not img_path.startswith("http"):
                             video_allowed = self.image_conf.get("video_enabled_types", ["greeting", "mood"])
                             if stype.value in video_allowed:
                                 video_url = await self.image_service.generate_video_from_image(img_path, content)
@@ -1570,7 +1570,7 @@ class TaskManager:
                 await self.plugin.context.send_message(uid, video_chain)
             elif img_path:
                 # 分享图片（如果视频没生成，或者视频关闭）
-                img_not_sent_yet = separate_img or audio_path
+                img_not_sent_yet = separate_img or audio_path or not should_send_text or not clean_text
                 if img_not_sent_yet:
                     img_chain = MessageChain()
                     if img_path.startswith("http"): img_chain.url_image(img_path)

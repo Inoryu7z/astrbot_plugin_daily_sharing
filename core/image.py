@@ -217,9 +217,14 @@ class ImageService:
             logger.warning("[DailySharing] Prompt 组装失败，取消配图")
             return None
         logger.info(f"[DailySharing] 最终配图 Prompt: {prompt[:100]}...")
-        self._last_image_description = prompt
 
-        return await self._call_aiimg_selfie(prompt, persona_name=persona_name)
+        result = await self._call_aiimg_selfie(prompt, persona_name=persona_name)
+        if result:
+            self._last_image_description = prompt
+        else:
+            self._last_image_description = None
+
+        return result
 
     def _assemble_selfie_prompt(self, content: str, sharing_type: SharingType, visuals: Dict) -> str:
         parts = []
@@ -322,12 +327,15 @@ class ImageService:
 
             logger.info("[DailySharing] 正在使用多模态模型分析图片内容...")
 
+            video_provider_id = self.img_conf.get("video_llm_provider_id", "").strip() or None
+
             # 调用多模态LLM
             resp = await self.call_llm(
                 prompt=user_prompt,
                 system_prompt=system_prompt,
                 timeout=30,
-                image_urls=[image_url]
+                image_urls=[image_url],
+                provider_id=video_provider_id
             )
 
             if resp and len(resp) > 10:
@@ -424,13 +432,16 @@ class ImageService:
                 logger.warning("[DailySharing] 未配置视频服务提供商")
                 return None
 
-            provider_id = chain[0]
-            try:
-                backend = self._aiimg_plugin.registry.get_video_backend(provider_id)
-                return await backend.generate_video_url(prompt=video_prompt, image_bytes=image_bytes)
-            except Exception as e:
-                logger.error(f"[DailySharing] 获取视频后端或生成失败: {e}")
-                return None
+            for provider_id in chain:
+                try:
+                    backend = self._aiimg_plugin.registry.get_video_backend(provider_id)
+                    return await backend.generate_video_url(prompt=video_prompt, image_bytes=image_bytes)
+                except Exception as e:
+                    logger.warning(f"[DailySharing] 视频后端 {provider_id} 生成失败: {e}")
+                    continue
+
+            logger.error("[DailySharing] 所有视频后端均失败")
+            return None
 
         except Exception as e:
             logger.error(f"[DailySharing] 视频生成流程异常: {e}")
@@ -542,6 +553,9 @@ class ImageService:
 
             await self._auto_save_to_wardrobe(path_obj, resolved_persona)
 
+            if path_obj is None:
+                logger.error("[DailySharing] aiimg.edit.edit() 返回 None，自拍生成失败")
+                return None
             return str(path_obj)
 
         except Exception as e:
