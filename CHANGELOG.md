@@ -20,6 +20,7 @@
 *   修复：识图401根因——传 `data:` URI 给 AstrBot 导致文件打开失败，改为直接传本地路径
 *   修复：指定 `provider_id` 时 401 不应降级到不支持图片的默认模型
 *   修复：`generate_video_from_image` 不传 `persona_name`，人格级视频识图 LLM 配置无法生效
+*   修复：全局锁导致多人格分享任务互相排斥，改为人格级锁
 
 ### v5.5.7
 **🐛 修复 ContextService 崩溃 + 全局分享任务不启动**
