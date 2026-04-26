@@ -22,7 +22,7 @@ class TaskManager:
         self.news_service = plugin.news_service
         self.image_service = plugin.image_service
         self.content_service = plugin.content_service
-        self._lock = plugin._lock
+        self._get_lock = plugin._get_lock
         
         self.basic_conf = plugin.basic_conf
         self.extra_shares_conf = plugin.extra_shares_conf
@@ -137,9 +137,10 @@ class TaskManager:
                 self.plugin._bg_tasks.add(task)
                 try:
                     await self.db.update_state_dict(f"target_{target_id}", {"pending_delay_job": None})
-                    if self._lock.locked():
+                    lock = self._get_lock(persona_name)
+                    if lock.locked():
                         logger.warning(f"[DailySharing] 独立任务 {target_id} 触发，系统繁忙排队中...")
-                    async with self._lock:
+                    async with lock:
                         logger.debug(f"[DailySharing] 独立时间到达，开始执行独立分享任务: {target_id}")
                         await self.execute_share(specific_target=target_umo, persona_name=persona_name)
                 finally:
@@ -281,7 +282,7 @@ class TaskManager:
             async def delayed_recover():
                 if self.plugin._is_terminated: return
                 await self.db.update_state_dict(f"target_{tid}", {"pending_delay_job": None})
-                async with self._lock:
+                async with self._get_lock():
                     logger.debug(f"[DailySharing] 补偿恢复，执行独立分享任务: {tid}")
                     await self.execute_share(specific_target=target_umo)
             return delayed_recover
@@ -399,10 +400,11 @@ class TaskManager:
                     if (now - last_time).total_seconds() < 60:
                         logger.debug(f"[DailySharing] 检测到近期已执行任务{'[人格: '+persona_name+']' if persona_name else ''}，跳过本次触发。")
                         return
-                if self._lock.locked():
-                    logger.warning("[DailySharing] 上一个任务正在进行中，跳过本次触发。")
+                lock = self._get_lock(persona_name)
+                if lock.locked():
+                    logger.warning(f"[DailySharing] 上一个任务正在进行中{'[人格: '+persona_name+']' if persona_name else ''}，跳过本次触发。")
                     return
-                async with self._lock:
+                async with lock:
                     self.plugin._last_share_time[debounce_key] = now
                     logger.info(f"[DailySharing] 开始执行分享任务{' [人格: '+persona_name+']' if persona_name else ''}...")
                     await self.execute_share(persona_name=persona_name)

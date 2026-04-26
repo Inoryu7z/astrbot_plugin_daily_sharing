@@ -43,8 +43,14 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
         self.history_limit = 100
         
         # 锁与防抖
-        self._lock = asyncio.Lock()
+        self._locks = {}
         self._last_share_time = {}
+    
+    def _get_lock(self, persona_name: str = None) -> asyncio.Lock:
+        key = persona_name or "_default"
+        if key not in self._locks:
+            self._locks[key] = asyncio.Lock()
+        return self._locks[key]
         
         # 生命周期标志位 
         self._is_terminated = False
@@ -394,7 +400,9 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
         if self._is_terminated: return ""
 
         # 1. 防抖检查
-        if self._lock.locked():
+        persona_name = await self.resolve_persona_from_event(event)
+        lock = self._get_lock(persona_name)
+        if lock.locked():
             await event.send(event.plain_result("正如火如荼地准备中，请稍后..."))
             return None
 
