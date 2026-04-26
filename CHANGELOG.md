@@ -3,9 +3,8 @@
 
 *   新增 `enable_smart_video_prompt` 配置项（默认开启）：使用多模态LLM识图后生成针对性的视频提示词
 *   新增 `video_director_prompt` 配置项：视频动效提示词模板，支持 WebUI 编辑器自定义
-*   新增 `video_llm_provider_id` 配置项：视频识图独立LLM，留空则用全局LLM
+*   新增 `video_llm_provider_id` 配置项：视频识图独立LLM，留空则用全局LLM（支持全局和人格级）
 *   新增 `_analyze_image_for_video()` 方法：调用多模态模型识图，生成视频动态描述
-*   新增 `_get_image_url_for_llm()` 方法：支持 file_token 和 base64 两种方式将图片传给LLM
 *   新增 `_get_default_video_prompt()` 方法：保留旧版默认提示词作为降级方案
 *   视频提示词固定以"参考图片中的少女形象，她"开头，锁定身份锚点
 *   识图失败或关闭智能提示词时，自动回退到旧版默认提示词
@@ -18,6 +17,9 @@
 *   修复：`send()` 在文字内容为空时丢失图片
 *   修复：`_temp_fallback_provider` 永不重置，LLM降级后无法恢复
 *   修复：视频生成仅使用 chain[0]，无降级，现在遍历所有 provider
+*   修复：识图401根因——传 `data:` URI 给 AstrBot 导致文件打开失败，改为直接传本地路径
+*   修复：指定 `provider_id` 时 401 不应降级到不支持图片的默认模型
+*   修复：`generate_video_from_image` 不传 `persona_name`，人格级视频识图 LLM 配置无法生效
 
 ### v5.5.7
 **🐛 修复 ContextService 崩溃 + 全局分享任务不启动**
