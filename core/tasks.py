@@ -1522,65 +1522,62 @@ class TaskManager:
         """分享内容（支持分开分享，支持语音和视频）"""
         if self.plugin._is_terminated: return
 
-        try:
-            separate_img = self.image_conf.get("separate_text_and_image", True)
-            prefer_audio_only = self.tts_conf.get("prefer_audio_only", False)
-            
-            # 清洗情感标签
-            clean_text = re.sub(r'\$\$(?:EMO:)?(?:happy|sad|angry|neutral|surprise)\$\$', '', text, flags=re.IGNORECASE).strip()
-            
-            # 判断是否应该分享文字
-            # 如果有语音，且开启了“仅发语音”，则不发文字
-            should_send_text = True
-            if audio_path and prefer_audio_only:
-                should_send_text = False
+        separate_img = self.image_conf.get("separate_text_and_image", True)
+        prefer_audio_only = self.tts_conf.get("prefer_audio_only", False)
+        
+        clean_text = re.sub(r'\$\$(?:EMO:)?(?:happy|sad|angry|neutral|surprise)\$\$', '', text, flags=re.IGNORECASE).strip()
+        
+        should_send_text = True
+        if audio_path and prefer_audio_only:
+            should_send_text = False
 
-            # 1. 分享文字（如果需要）
-            if should_send_text and clean_text: 
+        # 1. 分享文字
+        if should_send_text and clean_text: 
+            try:
                 text_chain = MessageChain().message(clean_text) 
-                # 如果图片不分开分享，且没有语音，且没有视频（视频无法合并），则合并图片
                 if img_path and not video_url and not separate_img and not audio_path:
                     if img_path.startswith("http"): text_chain.url_image(img_path)
                     else: text_chain.file_image(img_path)
-                
                 await self.plugin.context.send_message(uid, text_chain)
-                
-                # 如果后续还有消息，进行随机延迟
-                if audio_path or ((img_path or video_url) and separate_img):
-                    await self.random_sleep()
+            except Exception as e:
+                logger.error(f"[DailySharing] 发送文字给 {uid} 失败: {e}")
+            
+            if audio_path or ((img_path or video_url) and separate_img):
+                await self.random_sleep()
 
-            # 2. 分享语音（如果有）
-            if audio_path:
+        # 2. 分享语音
+        if audio_path:
+            try:
                 audio_chain = MessageChain()
                 audio_chain.chain.append(Record(file=audio_path))
                 await self.plugin.context.send_message(uid, audio_chain)
-                
-                # 如果后续还有视觉媒体，延迟
-                if (img_path or video_url) and separate_img:
-                    await self.random_sleep()
+            except Exception as e:
+                logger.error(f"[DailySharing] 发送语音给 {uid} 失败: {e}")
             
-            # 3. 分享视觉媒体（视频优先，其次图片）
-            if video_url:
-                # 分享视频
+            if (img_path or video_url) and separate_img:
+                await self.random_sleep()
+        
+        # 3. 分享视觉媒体（视频优先，其次图片）
+        if video_url:
+            try:
                 video_chain = MessageChain()
-                # 判断是本地文件还是网络URL
                 if video_url.startswith("http"):
                     video_chain.chain.append(Video.fromURL(video_url))
                 else:
-                    # 如果是本地路径，使用 fromFile
                     video_chain.chain.append(Video.fromFileSystem(video_url))              
                 await self.plugin.context.send_message(uid, video_chain)
-            elif img_path:
-                # 分享图片（如果视频没生成，或者视频关闭）
-                img_not_sent_yet = separate_img or audio_path or not should_send_text or not clean_text
-                if img_not_sent_yet:
+            except Exception as e:
+                logger.error(f"[DailySharing] 发送视频给 {uid} 失败: {e}")
+        elif img_path:
+            img_not_sent_yet = separate_img or audio_path or not should_send_text or not clean_text
+            if img_not_sent_yet:
+                try:
                     img_chain = MessageChain()
                     if img_path.startswith("http"): img_chain.url_image(img_path)
                     else: img_chain.file_image(img_path)
                     await self.plugin.context.send_message(uid, img_chain)
-
-        except Exception as e:
-            logger.error(f"[DailySharing] 分享内容给 {uid} 失败: {e}")
+                except Exception as e:
+                    logger.error(f"[DailySharing] 发送图片给 {uid} 失败: {e}")
 
     async def random_sleep(self):
         """随机延迟"""
