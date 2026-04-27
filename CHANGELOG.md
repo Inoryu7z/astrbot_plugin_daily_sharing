@@ -22,6 +22,7 @@
 *   修复：`generate_video_from_image` 不传 `persona_name`，人格级视频识图 LLM 配置无法生效
 *   修复：全局锁导致多人格分享任务互相排斥，改为人格级锁
 *   修复：`send()` 单个 try/except 导致视频超时后文字和图片全部丢失，改为每条消息独立 try/except
+*   修复：`_bg_tasks` AttributeError——重构锁机制时 `__init__` 代码误放在 `_get_lock()` 的 `return` 之后，导致所有实例变量从未初始化
 
 ### v5.5.7
 **🐛 修复 ContextService 崩溃 + 全局分享任务不启动**

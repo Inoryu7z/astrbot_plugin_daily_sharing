@@ -45,12 +45,6 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
         # 锁与防抖
         self._locks = {}
         self._last_share_time = {}
-    
-    def _get_lock(self, persona_name: str = None) -> asyncio.Lock:
-        key = persona_name or "_default"
-        if key not in self._locks:
-            self._locks[key] = asyncio.Lock()
-        return self._locks[key]
         
         # 生命周期标志位 
         self._is_terminated = False
@@ -102,6 +96,12 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
 
         # 多人格支持
         self._persona_cache = {}
+    
+    def _get_lock(self, persona_name: str = None) -> asyncio.Lock:
+        key = persona_name or "_default"
+        if key not in self._locks:
+            self._locks[key] = asyncio.Lock()
+        return self._locks[key]
 
     def get_enabled_personas(self) -> list:
         entries = self._persona_entries()
