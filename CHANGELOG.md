@@ -21,6 +21,7 @@
 *   修复：指定 `provider_id` 时 401 不应降级到不支持图片的默认模型
 *   修复：`generate_video_from_image` 不传 `persona_name`，人格级视频识图 LLM 配置无法生效
 *   修复：全局锁导致多人格分享任务互相排斥，改为人格级锁
+*   修复：`send()` 单个 try/except 导致视频超时后文字和图片全部丢失，改为每条消息独立 try/except
 
 ### v5.5.7
 **🐛 修复 ContextService 崩溃 + 全局分享任务不启动**
