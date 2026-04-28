@@ -7,10 +7,11 @@ from astrbot.api import logger
 from ..config import SharingType, TimePeriod
 
 class ImageService:
-    def __init__(self, context, config, llm_func):
+    def __init__(self, context, config, llm_func, plugin=None):
         self.context = context
         self.config = config
         self.call_llm = llm_func
+        self.plugin = plugin
         self._aiimg_plugin = None
         self._aiimg_plugin_not_found = False
         self._wardrobe_plugin = None

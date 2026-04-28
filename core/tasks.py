@@ -689,19 +689,17 @@ class TaskManager:
 
         last_type = state.get("last_type", "")
 
-        mood_candidates = await self._get_mood_driven_candidates(seq, persona_name=persona_name)
-
-        if mood_candidates:
-            candidates = mood_candidates
-        else:
-            candidates = seq
+        mood_boosted = await self._get_mood_driven_candidates(seq, persona_name=persona_name)
+        candidates = seq
 
         weights = []
         for t in candidates:
             if t == last_type:
                 weights.append(1)
+            elif t in mood_boosted:
+                weights.append(5)
             else:
-                weights.append(3)
+                weights.append(2)
 
         total = sum(weights)
         if total == 0:
@@ -725,50 +723,46 @@ class TaskManager:
         try: return SharingType(selected)
         except: return SharingType.GREETING
 
-    async def _get_mood_driven_candidates(self, fallback_seq: list, persona_name: str = None) -> list:
-        """根据 DayMind 心情数据筛选候选类型池"""
+    async def _get_mood_driven_candidates(self, fallback_seq: list, persona_name: str = None) -> set:
+        """根据 DayMind 心情数据返回应被加权提升的分享类型集合（不替换候选池）"""
         try:
             content_svc = self.content_service
             if not content_svc:
-                return []
+                return set()
 
             mood_data = await content_svc._get_daymind_mood(persona_name=persona_name)
             if not mood_data:
-                return []
+                return set()
 
             label = mood_data.get("label", "")
             if not label:
-                return []
+                return set()
 
             positive_moods = {"开心", "放松", "期待", "安心"}
             neutral_moods = {"平静"}
             negative_moods = {"烦躁", "紧张", "委屈", "低落", "疲惫"}
             dream_moods = {"疲惫", "低落", "平静"}
 
-            candidates = []
+            candidates = set()
 
             if label in positive_moods:
-                candidates = ["life_moment", "recommendation", "greeting"]
+                candidates = {"life_moment", "recommendation", "greeting"}
             elif label in neutral_moods:
-                candidates = ["life_moment", "news", "mood"]
+                candidates = {"life_moment", "news", "mood"}
             elif label in negative_moods:
-                candidates = ["rant", "mood", "life_moment"]
+                candidates = {"rant", "mood", "life_moment"}
 
             if label in dream_moods:
-                candidates.append("dream")
+                candidates.add("dream")
 
             if not candidates:
-                return []
+                return set()
 
-            filtered = [c for c in candidates if c in fallback_seq]
-            if filtered:
-                return filtered
-
-            return candidates
+            return candidates & set(fallback_seq)
 
         except Exception as e:
             logger.debug(f"[DailySharing] 心情驱动选择失败: {e}")
-            return []
+            return set()
 
     def _parse_targets_config(self, conf_list):
         """核心解析器：支持 群号:Cron时间:类型 这种三段式复杂写法"""

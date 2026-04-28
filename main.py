@@ -73,7 +73,7 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
         # 初始化服务层
         self.ctx_service = ContextService(context, config, self)
         self.news_service = NewsService(config, self)
-        self.image_service = ImageService(context, config, self._call_llm_wrapper)
+        self.image_service = ImageService(context, config, self._call_llm_wrapper, self)
         
         # 初始化内容服务
         self.content_service = ContentService(
