@@ -235,19 +235,26 @@ class ImageService:
             logger.info(f"[DailySharing] 【DEBUG】开始组装自拍 Prompt")
             logger.info(f"[DailySharing] 【DEBUG】Visuals 字典内容: {visuals}")
 
+        def _clean(s: str) -> str:
+            return s.strip().rstrip("。，,").strip()
+
         subject_str = visuals.get("subject", "")
         has_subj = subject_str and subject_str not in ["无", "N/A", "None", ""]
 
         if has_subj:
-            parts.append(f"手持或展示{subject_str}")
+            parts.append(f"手持或展示{_clean(subject_str)}")
 
         outfit = visuals.get("outfit", "")
         if outfit:
-            parts.append(f"穿着{outfit}")
+            outfit_clean = _clean(outfit)
+            if outfit_clean.startswith("穿着") or outfit_clean.startswith("身穿"):
+                parts.append(outfit_clean)
+            else:
+                parts.append(f"穿着{outfit_clean}")
 
         action = visuals.get("action", "")
         if action:
-            parts.append(action)
+            parts.append(_clean(action))
 
         if sharing_type == SharingType.GREETING:
             parts.append("半身自拍，面对镜头，微笑，背景虚化")
@@ -283,11 +290,14 @@ class ImageService:
 
         env = visuals.get("environment", "")
         if env:
-            parts.append(f"位于{env}")
+            env_clean = _clean(env)
+            if env_clean.startswith("在") or env_clean.startswith("位于"):
+                env_clean = env_clean.lstrip("在位于")
+            parts.append(f"位于{env_clean}")
 
         lighting = visuals.get("lighting", "")
         if lighting:
-            parts.append(lighting)
+            parts.append(_clean(lighting))
         else:
             period = self._get_current_period()
             if period in [TimePeriod.NIGHT, TimePeriod.LATE_NIGHT]:
@@ -297,7 +307,7 @@ class ImageService:
 
         weather_vibe = visuals.get("weather_vibe", "")
         if weather_vibe:
-            parts.append(weather_vibe)
+            parts.append(_clean(weather_vibe))
 
         result = "，".join(filter(None, parts))
 
@@ -343,7 +353,7 @@ class ImageService:
             if resp and len(resp) > 10:
                 # 清理可能的引号或多余格式
                 video_prompt = resp.strip().strip('"').strip("'")
-                logger.info(f"[DailySharing] AI生成的视频提示词: {video_prompt[:80]}...")
+                logger.info(f"[DailySharing] AI生成的视频提示词: {video_prompt}")
                 return video_prompt
             else:
                 logger.warning("[DailySharing] 多模态模型返回空或无效内容，使用默认提示词")
@@ -391,7 +401,7 @@ class ImageService:
                 video_prompt = await self._analyze_image_for_video(image_path, content, persona_name=persona_name)
             else:
                 video_prompt = self._get_default_video_prompt()
-                logger.info(f"[DailySharing] 使用默认视频提示词: {video_prompt[:80]}...")
+                logger.info(f"[DailySharing] 使用默认视频提示词: {video_prompt}")
 
             if hasattr(self._aiimg_plugin, "_get_video_chain"):
                 chain = self._aiimg_plugin._get_video_chain()
@@ -499,9 +509,9 @@ class ImageService:
                 final_prompt = aiimg._build_selfie_prompt(prompt, extra_refs=0, prompt_prefix=prompt_prefix)
             else:
                 if prompt_prefix:
-                    final_prompt = f"{prompt_prefix}\n\n用户要求：{prompt}"
+                    final_prompt = f"{prompt_prefix}\n\n{prompt}"
                 else:
-                    final_prompt = f"以参考图中同一少女为基准，完整保留其五官、身材等全部人体特征，绝对禁止任何拼图，参考她的面部特征为其生成一张单人的自然生活照：她有着白皙细腻的皮肤，纤细的身姿与格外饱满的曲线形成鲜明对比，\n\n用户要求：{prompt}"
+                    final_prompt = f"以参考图中同一少女为基准，完整保留其五官、身材等全部人体特征，绝对禁止任何拼图，参考她的面部特征为其生成一张单人的自然生活照：她有着白皙细腻的皮肤，纤细的身姿与格外饱满的曲线形成鲜明对比，{prompt}"
 
             if self.debug_mode:
                 logger.info("=" * 60)
