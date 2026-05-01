@@ -403,12 +403,11 @@ class ImageService:
                 video_prompt = self._get_default_video_prompt()
                 logger.info(f"[DailySharing] 使用默认视频提示词: {video_prompt}")
 
-            if hasattr(self._aiimg_plugin, "_get_video_chain"):
+            chain = None
+            if persona_name and hasattr(self._aiimg_plugin, "_get_persona_video_chain"):
+                chain = self._aiimg_plugin._get_persona_video_chain(persona_name)
+            if not chain and hasattr(self._aiimg_plugin, "_get_video_chain"):
                 chain = self._aiimg_plugin._get_video_chain()
-            else:
-                logger.warning("[DailySharing] 无法获取视频服务配置链")
-                return None
-
             if not chain:
                 logger.warning("[DailySharing] 未配置视频服务提供商")
                 return None
