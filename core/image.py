@@ -467,7 +467,10 @@ class ImageService:
             logger.info(f"[DailySharing] 使用自拍模式，人格: {resolved_persona}")
 
             ref_paths = []
-            if hasattr(aiimg, "_get_persona_config_selfie_reference_paths"):
+            if hasattr(aiimg, "_get_selfie_reference_paths"):
+                ref_paths, source = await aiimg._get_selfie_reference_paths(None, persona_name=resolved_persona)
+                logger.info(f"[DailySharing] 参考照来源: {source}, 数量: {len(ref_paths)}")
+            elif hasattr(aiimg, "_get_persona_config_selfie_reference_paths"):
                 ref_paths = aiimg._get_persona_config_selfie_reference_paths(resolved_persona)
 
             if not ref_paths:
