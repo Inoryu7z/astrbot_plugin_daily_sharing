@@ -78,28 +78,6 @@ class ImageService:
 
         now = datetime.now()
         curr_hour = now.hour
-        period = self._get_current_period()
-        is_night = period in [TimePeriod.LATE_NIGHT, TimePeriod.DAWN]
-
-        if period == TimePeriod.DAWN:
-            if curr_hour < 4:
-                time_hint = "凌晨深夜的寂静，漆黑的夜空，漆黑的夜色，路灯或城市灯光"
-            else:
-                time_hint = "黎明前的微光，天空是非常深的暗蓝色，微弱的冷光，清冷寂静，朦胧感"
-        elif period == TimePeriod.MORNING:
-            time_hint = "早晨的日出晨光, 柔和的朝阳, 清晨柔和的漫射光，丁达尔效应, 梦幻光影"
-        elif period == TimePeriod.FORENOON:
-            time_hint = "上午的明亮日光，通透，晴朗的天空, 充满活力的光线"
-        elif period == TimePeriod.AFTERNOON:
-            time_hint = "下午的充足阳光，光影对比清晰，慵懒或明亮的氛围, 清晰的照明"
-        elif period == TimePeriod.EVENING:
-            time_hint = "傍晚的暖色调，温暖的金色夕阳, 晚霞或暮色，柔和的长阴影，逆光轮廓"
-        elif period == TimePeriod.NIGHT:
-            time_hint = "夜晚的漆黑天空, 深沉的夜景，城市霓虹灯光, 室内温馨的人造暖光"
-        else:
-            time_hint = "深夜的幽暗氛围，漆黑的环境，城市夜景，昏暗的室内人造光，宁静的氛围"
-
-        outfit_hint = "当前是休息时间，忽略白天外出服装，仅提取睡衣或家居服。" if is_night else "当前是活动时间，提取完整的外出日常穿搭。"
 
         prioritize_text = self.img_conf.get("priority_text_over_schedule", True)
 
@@ -119,22 +97,19 @@ class ImageService:
             try:
                 system_prompt = custom_prompt.format(
                     logic_prompt=logic_prompt,
-                    curr_hour=curr_hour,
-                    time_hint=time_hint,
-                    outfit_hint=outfit_hint
+                    curr_hour=curr_hour
                 )
             except KeyError as e:
                 logger.warning(f"[DailySharing] 自定义视觉导演提示词缺少变量: {e}，使用默认模板")
-                system_prompt = self._get_default_visual_director_prompt(logic_prompt, curr_hour, time_hint, outfit_hint)
+                system_prompt = self._get_default_visual_director_prompt(logic_prompt, curr_hour)
         else:
-            system_prompt = self._get_default_visual_director_prompt(logic_prompt, curr_hour, time_hint, outfit_hint)
+            system_prompt = self._get_default_visual_director_prompt(logic_prompt, curr_hour)
 
         user_prompt = f"【分享文案】：{content}\n【生活日程】：{life_context}\n\n请提取视觉元素："
 
         if self.debug_mode:
             logger.info("-" * 60)
-            logger.info(f"[DailySharing] 【DEBUG】发送给 Agent 的请求详情 (时间: {curr_hour}:00, is_night: {is_night})")
-            logger.info(f"[DailySharing] 【DEBUG】Outfit Hint: {outfit_hint}")
+            logger.info(f"[DailySharing] 【DEBUG】发送给 Agent 的请求详情 (时间: {curr_hour}:00)")
             logger.info(f"[DailySharing] 【DEBUG】System Prompt (前300字): {system_prompt[:300]}...")
             logger.info(f"[DailySharing] 【DEBUG】User Prompt: {user_prompt}")
 
@@ -153,40 +128,52 @@ class ImageService:
             logger.warning(f"[DailySharing] Agent 提取失败: {e}")
             return {}
 
-    def _get_default_visual_director_prompt(self, logic_prompt: str, curr_hour: int, time_hint: str, outfit_hint: str) -> str:
-        return f"""你是一个专业的 AI 绘画视觉导演。
-任务：根据用户的【分享文案】和【生活日程】，提取画面关键词。
+    def _get_default_visual_director_prompt(self, logic_prompt: str, curr_hour: int) -> str:
+        return f"""你是 AI 绘画视觉导演。从用户的【分享文案】和【生活日程】中提取画面关键词。
 
-【提取逻辑】
-1. **分析主体 (Subject)**：首先判断文案是否在描述或推荐一个**具体物品**（如美食、书籍、电子产品、电影海报）。
-   - 如果是：该物品就是【subject】。
-   - 如果否（文案是纯风景描绘）：【subject】填"无"。
-2. **分析背景 (Environment)**：
+当前时间：{curr_hour}:00。确保场景的光线和活动类型与当前时间吻合。
+
 {logic_prompt}
-3. **负向过滤（未来禁区）**：**严禁**提取 {curr_hour}:00 之后的未来日程作为背景。
-   - 错误示例：现在8点，日程显示11点去公园。-> **绝对不能**画公园。
-   - 正确操作：现在8点，日程显示9点才醒。-> **必须**画卧室/床/室内。
+严禁提取 {curr_hour}:00 之后的日程作为当前场景。
 
-【提取要求】
-1. **主体 (subject)**：【最重要】画面的核心物体描述（例如：精致的荷花酥，一杯牛奶或者一本封皮复古的书）。如果是纯风景或画人，此项填"无"。
-2. **环境 (environment)**：根据逻辑确定的具体地点。注意：环境只是背景，不要过度展开描述，避免抢夺画面主体。
-3. **光影 (lighting)**：参考时间段[{time_hint}]。如果是室内，强调人造光；如果是室外，强调自然天气氛围。
-4. **穿搭 (outfit)**：{outfit_hint} 请明确区分"内搭"和"外穿"层次。
-5. **动作 (action)**：人物动作。
+【输出铁律】
+只输出相机镜头能直接拍到的内容：颜色、形状、材质、光线、空间关系。
+禁止：情绪词、氛围渲染、抽象状态、嗅觉听觉。
 
-【构图要求】
-这是一张自拍/生活照，人物必须占据画面的主要部分。环境是背景，不是主体。环境描述要简洁，只写最必要的场景定位，不要写环境细节。
+【字段要求】
 
-请严格输出 JSON 格式：
+穿搭 (outfit) —— 最重要，画面核心
+逐件描述服装，区分内搭/外穿，每件给出：款式 + 颜色 + 材质 + 版型特征。
+差："一身暗黑系穿搭，神秘优雅" ← 这是总结，不是描述
+
+动作 (action) —— 次重要，决定画面生动度
+描述一个能被快门定格的瞬时静态姿势。写出具体的身体部位在做什么。
+差："正在卸妆，动作轻柔" ← 太笼统，没有具体姿态
+
+构图 (composition)
+景别（特写/半身/全身）、视角（平视/俯拍/仰拍）、镜头效果（景深/虚化/广角）。
+差："营造亲密的视觉感受"
+
+环境 (environment)
+具体地点 + 场景内的可见物体（家具、摆设、墙色、窗等）。用物体定位空间。
+差："温馨的卧室，宁静的氛围"
+
+光影 (lighting)
+光源类型（日光/台灯/顶灯/窗光）、方向、颜色、画面的明暗分布。
+差："柔和的灯光营造出温馨氛围"
+
+主体 (subject)
+若文案推荐具体物品则描述该物品；纯风景或画人时填"无"。
+
+请严格输出 JSON：
 {{
-    "subject": "...",      // 主体 (例如: 粉色荷花酥)
-    "environment": "...",  // 环境 (例如: 苏州河畔的野餐垫上)
-    "lighting": "...",     // 光影 (例如：昏黄的室内灯光)
-    "outfit": "...",       // 穿搭 (例如：白色棒球服外套，内搭黑色高领毛衣)
-    "action": "...",       // 动作 (例如：双手捧着热咖啡)
-    "weather_vibe": "..."  // 例如：玻璃上有水雾，朦胧感
-}}
-"""
+    "outfit": "...",       // 穿搭的详细描述——逐件列出，区分内外搭，每件写款式、颜色、材质、版型
+    "action": "...",       // 动作描述——具体身体部位在做什么，能被快门定格的一个瞬时静态姿势
+    "composition": "...",  // 构图——景别、视角、镜头效果
+    "environment": "...",  // 环境——具体地点和可见物体
+    "lighting": "...",     // 光影——光源类型、方向、颜色、明暗分布
+    "subject": "..."       // 主体物品描述，纯风景或画人时填"无"
+}}"""
 
     # ==================== 2. 主入口 ====================
 
@@ -209,8 +196,8 @@ class ImageService:
             env = visuals.get('environment', '无')
             subj = visuals.get('subject', '无')
             outfit = visuals.get('outfit', '无')
-            weather = visuals.get('weather_vibe', '无')
-            logger.info(f"[DailySharing] Agent 提取 -> 主体: {subj} | 环境: {env} | 天气: {weather} | 穿搭: {outfit[:15] if outfit else '无'}...")
+            comp = visuals.get('composition', '无')
+            logger.info(f"[DailySharing] Agent 提取 -> 主体: {subj} | 环境: {env} | 构图: {comp} | 穿搭: {outfit[:15] if outfit else '无'}...")
 
         prompt = self._assemble_selfie_prompt(content, sharing_type, visuals)
 
@@ -256,37 +243,9 @@ class ImageService:
         if action:
             parts.append(_clean(action))
 
-        if sharing_type == SharingType.GREETING:
-            parts.append("半身自拍，面对镜头，微笑，背景虚化")
-        elif sharing_type == SharingType.MOOD:
-            parts.append("特写自拍，情绪表达，景深效果")
-        elif sharing_type == SharingType.NEWS:
-            if not action and not has_subj:
-                parts.append("半身生活快照，看手机或屏幕")
-            else:
-                parts.append("半身生活快照")
-        elif sharing_type == SharingType.LIFE_MOMENT:
-            if not action and not has_subj:
-                parts.append("半身随手拍，生活感，自然不做作")
-            else:
-                parts.append("半身生活快照，随意角度")
-        elif sharing_type == SharingType.RANT:
-            if not action and not has_subj:
-                parts.append("半身自拍，无奈表情，生活场景")
-            else:
-                parts.append("半身，带点情绪的姿态")
-        elif sharing_type == SharingType.DREAM:
-            if not action and not has_subj:
-                parts.append("半身自拍，若有所思的表情，柔和室内光")
-            else:
-                parts.append("半身生活照，自然姿态")
-        elif sharing_type == SharingType.RECOMMENDATION:
-            if not action and not has_subj:
-                parts.append("半身，展示物品，手部特写")
-            else:
-                parts.append("半身，聚焦物体")
-        else:
-            parts.append("半身自然姿态自拍")
+        composition = visuals.get("composition", "")
+        if composition:
+            parts.append(_clean(composition))
 
         env = visuals.get("environment", "")
         if env:
@@ -304,10 +263,6 @@ class ImageService:
                 parts.append("夜晚城市灯光")
             else:
                 parts.append("白天自然光")
-
-        weather_vibe = visuals.get("weather_vibe", "")
-        if weather_vibe:
-            parts.append(_clean(weather_vibe))
 
         result = "，".join(filter(None, parts))
 
