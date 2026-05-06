@@ -67,9 +67,9 @@ class ContextService:
         return self._memos_plugin
 
     def _get_tts_plugin_inst(self):
-        """获取 TTS 插件实例"""
+        """获取 TTS+ 插件实例 (巴巴啵一)"""
         if not self._tts_plugin:
-            self._tts_plugin = self._find_plugin("tts_emotion")
+            self._tts_plugin = self._find_plugin("tts_plus")
         return self._tts_plugin
 
     def _is_group_chat(self, target_umo: str) -> bool:
@@ -168,119 +168,75 @@ class ContextService:
 
     # ==================== TTS 集成 ====================
 
-    async def _agent_analyze_sentiment(self, content: str, sharing_type: SharingType) -> str:
+    async def text_to_speech(self, text: str, target_umo: str, sharing_type: SharingType = None, period: TimePeriod = None, persona_name: str = None) -> Optional[str]:
         """
-        使用 Agent 分析文本情感
+        调用 巴巴啵一 (tts_plus) 插件将文本转换为语音文件路径。
+        按 persona_name 匹配巴巴啵一的 select_persona 槽位。
         """
-        if not content: return "neutral"
-        
-        # 1. 如果内容太短，不浪费 Token，直接用简单的 fallback
-        if len(content) < 5: return "neutral"
-
-        # 2. 构造 Prompt
-        system_prompt = """你是一个情感分析专家。
-任务：分析文本的情感基调，并从以下列表中选择最匹配的一个标签返回。
-标签列表：[happy, sad, angry, neutral, surprise]
-
-定义：
-- happy: 开心、兴奋、推荐、积极、治愈、期待、早安
-- sad: 难过、遗憾、深夜emo、疲惫、怀念、低落、晚安
-- angry: 生气、愤怒、吐槽、不爽、谴责
-- surprise: 震惊、不可思议、没想到、吃瓜
-- neutral: 客观陈述、平淡、普通问候、科普知识
-
-只输出标签单词，不要任何解释。"""
-
-        user_prompt = f"文本内容：{content[:300]}\n\n请分析情感标签："
-        
-        try:
-            # 使用 context 自带的 llm_generate
-            provider_id = self.llm_conf.get("llm_provider_id", "")
-            
-            # 设置较长的超时时间 (15秒)
-            resp = await asyncio.wait_for(
-                self.context.llm_generate(
-                    prompt=user_prompt, 
-                    system_prompt=system_prompt,
-                    chat_provider_id=provider_id if provider_id else None
-                ),
-                timeout=15 
-            )
-            
-            if resp and hasattr(resp, 'completion_text'):
-                emotion = resp.completion_text.strip().lower()
-                # 清洗结果
-                for valid in ["happy", "sad", "angry", "surprise", "neutral"]:
-                    if valid in emotion:
-                        return valid
-                        
-        except Exception as e:
-            logger.debug(f"[Context] 情感分析 Agent 超时或出错: {e}，回退到默认逻辑")
-        
-        # 3. 兜底逻辑 (如果 Agent 失败)
-        if sharing_type == SharingType.RECOMMENDATION: return "happy"
-        if sharing_type == SharingType.GREETING: return "happy"
-        return "neutral"
-
-    async def text_to_speech(self, text: str, target_umo: str, sharing_type: SharingType = None, period: TimePeriod = None) -> Optional[str]:
-        """
-        调用 TTS 插件将文本转换为语音文件路径
-        """
-        # 1. 检查开关
         if not self.tts_conf.get("enable_tts", False):
             return None
 
-        # 2. 获取插件
         tts_plugin = self._get_tts_plugin_inst()
         if not tts_plugin:
-            logger.warning("[DailySharing] 未找到 TTS 插件 (astrbot_plugin_tts_emotion_router)，无法生成语音。")
+            logger.warning("[DailySharing] 未找到 TTS+ 插件 (astrbot_plugin_tts_plus / 巴巴啵一)，无法生成语音。")
             return None
 
-        # 优先提取情感标签
-        target_emotion = "neutral"
-        
-        # 正则匹配 $$happy$$ 格式
-        emotion_match = re.search(r'\$\$(?:EMO:)?(happy|sad|angry|neutral|surprise)\$\$', text, flags=re.IGNORECASE)
-        if emotion_match:
-            target_emotion = emotion_match.group(1).lower()
-            logger.debug(f"[DailySharing] 检测到内置情感标签: {target_emotion}")
-        else:
-            # 如果没有标签，再尝试使用 Agent 分析 (仅作为后备)
-            if sharing_type:
-                target_emotion = await self._agent_analyze_sentiment(text, sharing_type)
+        if not persona_name:
+            try:
+                persona_mgr = getattr(self.context, "persona_manager", None)
+                if persona_mgr:
+                    persona_obj = await persona_mgr.get_default_persona_v3(target_umo)
+                    if persona_obj:
+                        persona_name = str(getattr(persona_obj, "name", "") or getattr(persona_obj, "persona_id", "") or "").strip()
+            except Exception:
+                pass
 
-        # 3. 文本清洗
-        final_text = text
-        # 正则替换：彻底清洗文本中可能存在的任何标签，只保留纯文本给 TTS
-        final_text = re.sub(r'\$\$(?:EMO:)?(?:happy|sad|angry|neutral|surprise)\$\$', '', final_text, flags=re.IGNORECASE).strip()
-        
-        # 5. 调用生成
+        if not persona_name:
+            logger.warning("[DailySharing] 无法获取当前人格名称，跳过 TTS")
+            return None
+
+        persona_result = tts_plugin._get_persona_provider(persona_name)
+        if not persona_result:
+            logger.warning(f"[DailySharing] 巴巴啵一中未找到人格 [{persona_name}] 的配置，跳过 TTS")
+            return None
+
+        provider, persona_cfg = persona_result
+
+        clean_text = re.sub(r'\$\$(?:EMO:)?(?:happy|sad|angry|neutral|surprise)\$\$', '', text, flags=re.IGNORECASE).strip()
+        if not clean_text:
+            return None
+
+        provider_id_used = str(persona_cfg.get("provider_id", ""))
+        if provider.provider_name == "mimo":
+            b64 = tts_plugin.config.get_audio_sample_base64(provider_id_used)
+            if b64:
+                provider.set_voice_sample(b64, "audio/mpeg")
+
+        voice = provider.get_default_voice()
+        speed_override = float(persona_cfg.get("speed", 1.0) or 1.0)
+
+        out_dir = self.plugin.data_dir / "tts_temp"
+        out_dir.mkdir(parents=True, exist_ok=True)
+
         try:
-            session_state = None
-            
-            if hasattr(tts_plugin, "_get_session_state"):
-                session_state = tts_plugin._get_session_state(target_umo)
-                
-                # 注入情感
-                if target_emotion:
-                    if hasattr(session_state, "pending_emotion"):
-                        session_state.pending_emotion = target_emotion
-                        logger.debug(f"[DailySharing] TTS 注入情绪: {target_emotion}")
+            logger.info(f"[DailySharing] 请求巴巴啵一生成语音: {clean_text[:20]}... (人格: {persona_name})")
 
-            logger.info(f"[DailySharing] 正在请求 TTS 生成: {final_text[:20]}... (情绪: {target_emotion})")
-            
-            # 调用 TTS 处理器的 process 方法
-            result = await tts_plugin.tts_processor.process(final_text, session_state)
+            audio_path = await provider.synth(
+                text=clean_text,
+                voice=voice,
+                out_dir=out_dir,
+                speed=speed_override if speed_override > 0 else None,
+            )
 
-            if result and result.success and result.audio_path:
-                logger.info(f"[DailySharing] TTS 生成成功: {result.audio_path}")
-                return str(result.audio_path)
+            if audio_path and audio_path.exists():
+                logger.info(f"[DailySharing] 巴巴啵一语音生成成功: {audio_path}")
+                return str(audio_path)
             else:
-                logger.warning(f"[DailySharing] TTS 生成失败: {getattr(result, 'error', '未知错误')}")
+                logger.warning("[DailySharing] 巴巴啵一语音生成未返回音频")
                 return None
 
         except Exception as e:
-            logger.error(f"[DailySharing] 调用 TTS 插件出错: {e}")
+            logger.error(f"[DailySharing] 巴巴啵一语音合成失败: {e}")
             return None
     
     # ==================== 生活上下文 (Life Scheduler) ====================

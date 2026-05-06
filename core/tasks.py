@@ -1069,7 +1069,7 @@ class TaskManager:
                     should_gen_voice = True
                         
                 if should_gen_voice:
-                    audio_path = await self.ctx_service.text_to_speech(content, target_umo, target_type_enum, period)
+                    audio_path = await self.ctx_service.text_to_speech(content, target_umo, target_type_enum, period, persona_name=persona_name)
 
             # 发送 (img_path 可能是热搜截图，也可能是AI画的图)
             await self.send(target_umo, content, img_path, audio_path, video_url)
@@ -1312,7 +1312,7 @@ class TaskManager:
                 
                 if enable_tts_global:
                     if stype.value in tts_allowed_types:
-                        audio_path = await self.ctx_service.text_to_speech(content, uid, stype, period)
+                        audio_path = await self.ctx_service.text_to_speech(content, uid, stype, period, persona_name=persona_name)
                     else:
                         logger.info(f"[DailySharing] 当前类型 {stype.value} 不在语音允许列表，跳过语音。")
 

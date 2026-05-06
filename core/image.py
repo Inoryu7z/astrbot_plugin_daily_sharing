@@ -95,14 +95,16 @@ class ImageService:
         custom_prompt = self.config.get("visual_director_prompt", "").strip()
         if custom_prompt:
             try:
-                system_prompt = custom_prompt.format(
-                    logic_prompt=logic_prompt,
-                    curr_hour=curr_hour
-                )
-            except KeyError as e:
-                logger.warning(f"[DailySharing] 自定义视觉导演提示词缺少变量: {e}，使用默认模板")
+                safe_format = dict(logic_prompt=logic_prompt, curr_hour=curr_hour)
+                system_prompt = custom_prompt.replace("{time_hint}", "").replace("{outfit_hint}", "").format(**safe_format)
+                if self.debug_mode:
+                    logger.info(f"[DailySharing] 视觉导演使用自定义提示词 (长度: {len(custom_prompt)} 字符)")
+            except (KeyError, ValueError) as e:
+                logger.warning(f"[DailySharing] 自定义视觉导演提示词格式化失败: {e}，使用默认模板")
                 system_prompt = self._get_default_visual_director_prompt(logic_prompt, curr_hour)
         else:
+            if self.debug_mode:
+                logger.info("[DailySharing] 视觉导演使用默认提示词模板")
             system_prompt = self._get_default_visual_director_prompt(logic_prompt, curr_hour)
 
         user_prompt = f"【分享文案】：{content}\n【生活日程】：{life_context}\n\n请提取视觉元素："

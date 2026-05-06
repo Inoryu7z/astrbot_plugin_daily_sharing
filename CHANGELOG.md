@@ -1,3 +1,14 @@
+### v5.6.1
+
+**🔊 TTS 迁移至巴巴啵一 + 视觉导演提示词修复**
+
+*   TTS 插件从 tts_emotion_router 迁移到 tts_plus (巴巴啵一)，原生支持多人格语音路由，按 persona_name 自动匹配巴巴啵一的 select_persona 槽位
+*   移除不再需要的 `_agent_analyze_sentiment` 情感分析方法（巴巴啵一自行处理情绪风格）
+*   `text_to_speech` 新增 `persona_name` 参数，调用链路透传人格名称
+*   修复视觉导演提示词：旧版自定义模板使用了 `weather_vibe` 字段（无 `composition`）及未处理的 `{time_hint}`/`{outfit_hint}` 占位符，导致输出结构异常；现已统一为新版模板，新增防御性占位符清理和 debug 日志，明确区分自定义/默认提示词来源
+
+---
+
 ### v5.6.0
 
 **🚀 新功能：视频生成跟随人格链路**
