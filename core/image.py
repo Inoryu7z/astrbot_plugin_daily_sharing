@@ -378,7 +378,6 @@ class ImageService:
             with open(image_path, "rb") as f: image_bytes = f.read()
             logger.info(f"[DailySharing] 正在将配图转换为视频...")
 
-            # 判断是否启用智能视频提示词
             if self.img_conf.get("enable_smart_video_prompt", True):
                 video_prompt = await self._analyze_image_for_video(image_path, content, persona_name=persona_name)
             else:
@@ -394,20 +393,54 @@ class ImageService:
                 logger.warning("[DailySharing] 未配置视频服务提供商")
                 return None
 
+            video_url = None
             for provider_id in chain:
                 try:
                     backend = self._aiimg_plugin.registry.get_video_backend(provider_id)
-                    return await backend.generate_video_url(prompt=video_prompt, image_bytes=image_bytes)
+                    video_url = await backend.generate_video_url(prompt=video_prompt, image_bytes=image_bytes)
+                    if video_url:
+                        break
                 except Exception as e:
                     logger.warning(f"[DailySharing] 视频后端 {provider_id} 生成失败: {e}")
                     continue
 
-            logger.error("[DailySharing] 所有视频后端均失败")
-            return None
+            if not video_url:
+                logger.error("[DailySharing] 所有视频后端均失败")
+                return None
+
+            await self._auto_save_video_to_wardrobe(video_url, image_path, persona_name)
+
+            return video_url
 
         except Exception as e:
             logger.error(f"[DailySharing] 视频生成流程异常: {e}")
             return None
+
+    async def _auto_save_video_to_wardrobe(self, video_url: str, source_image_path: str, persona_name: str = ""):
+        wardrobe = self._get_wardrobe_instance()
+        if not wardrobe or not hasattr(wardrobe, "_save_video_from_bytes"):
+            return
+        try:
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                async with session.get(video_url, timeout=aiohttp.ClientTimeout(total=120)) as resp:
+                    if resp.status != 200:
+                        logger.debug("[DailySharing] 下载视频失败: HTTP %d", resp.status)
+                        return
+                    video_bytes = await resp.read()
+
+            if not video_bytes:
+                return
+
+            logger.info("[DailySharing] 自动存视频到衣橱，视频大小=%.2fKB 人格=%s", len(video_bytes) / 1024, persona_name or "无")
+            await wardrobe._save_video_from_bytes(
+                video_bytes,
+                persona=persona_name,
+                source_image_path=source_image_path,
+                created_by="dailysharing",
+            )
+        except Exception as e:
+            logger.debug("[DailySharing] 自动存视频到衣橱失败: %s", e)
 
     def get_last_description(self) -> Optional[str]:
         return self._last_image_description
