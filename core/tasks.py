@@ -468,6 +468,17 @@ class TaskManager:
                     except Exception as e:
                         logger.error(f"[DailySharing] 解析时间段 {period_str} 失败: {e}")
 
+            adjusted_jobs = self._coordinate_random_times(jobs, now)
+            if adjusted_jobs != jobs:
+                for p_str, new_ts in adjusted_jobs.items():
+                    old_ts = jobs.get(p_str)
+                    if old_ts is not None and abs(new_ts - old_ts) > 60:
+                        old_t = datetime.fromtimestamp(old_ts).strftime('%H:%M:%S')
+                        new_t = datetime.fromtimestamp(new_ts).strftime('%H:%M:%S')
+                        logger.info(f"[DailySharing] {'人格 ['+persona_name+'] ' if persona_name else ''}防冲突调整: [{p_str}] {old_t} → {new_t}")
+                jobs = adjusted_jobs
+                is_modified = True
+
             if is_modified:
                 random_schedule["jobs"] = jobs
                 await self.db.update_state_dict(state_key, {"random_schedule": random_schedule})
@@ -579,6 +590,93 @@ class TaskManager:
         finally:
             self.plugin._bg_tasks.discard(task)
 
+
+    def _coordinate_random_times(self, jobs: dict, now: datetime) -> dict:
+        if len(jobs) < 2:
+            return jobs
+
+        parsed = {}
+        for period_str, ts in jobs.items():
+            try:
+                start_str, end_str = period_str.split('-')
+                start_h, start_m = map(int, start_str.split(':'))
+                end_h, end_m = map(int, end_str.split(':'))
+                start_dt = now.replace(hour=start_h, minute=start_m, second=0, microsecond=0)
+                end_dt = now.replace(hour=end_h, minute=end_m, second=59, microsecond=0)
+                if end_dt <= start_dt:
+                    continue
+                parsed[period_str] = {
+                    "timestamp": ts,
+                    "start_ts": start_dt.timestamp(),
+                    "end_ts": end_dt.timestamp(),
+                }
+            except Exception:
+                continue
+
+        if len(parsed) < 2:
+            return jobs
+
+        all_starts = [v["start_ts"] for v in parsed.values()]
+        all_ends = [v["end_ts"] for v in parsed.values()]
+        union_start = min(all_starts)
+        union_end = max(all_ends)
+        union_span = union_end - union_start
+
+        if union_span <= 0:
+            return jobs
+
+        num = len(parsed)
+        ideal_gap = union_span / (num + 1)
+        min_gap = max(1800, ideal_gap * 0.5)
+
+        for _round in range(5):
+            sorted_items = sorted(parsed.items(), key=lambda x: x[1]["timestamp"])
+            conflict_found = False
+
+            for i in range(len(sorted_items) - 1):
+                p1, d1 = sorted_items[i]
+                p2, d2 = sorted_items[i + 1]
+                gap = d2["timestamp"] - d1["timestamp"]
+
+                if gap >= min_gap:
+                    continue
+
+                conflict_found = True
+                needed = min_gap - gap
+
+                push_later_ok = (d2["timestamp"] + needed) <= d2["end_ts"]
+                pull_earlier_ok = (d1["timestamp"] - needed) >= d1["start_ts"]
+
+                if push_later_ok and pull_earlier_ok:
+                    later_room = d2["end_ts"] - d2["timestamp"] - needed
+                    earlier_room = d1["timestamp"] - d1["start_ts"] - needed
+                    if later_room >= earlier_room:
+                        d2["timestamp"] += needed
+                    else:
+                        d1["timestamp"] -= needed
+                elif push_later_ok:
+                    d2["timestamp"] += needed
+                elif pull_earlier_ok:
+                    d1["timestamp"] -= needed
+                else:
+                    reduced_gap = d2["end_ts"] - d1["start_ts"]
+                    if reduced_gap > 0:
+                        mid = (d1["start_ts"] + d2["end_ts"]) / 2
+                        d1_new = mid - reduced_gap / 2
+                        d2_new = mid + reduced_gap / 2
+                        d1["timestamp"] = max(d1["start_ts"], min(d1_new, d1["end_ts"]))
+                        d2["timestamp"] = max(d2["start_ts"], min(d2_new, d2["end_ts"]))
+                    else:
+                        logger.warning(f"[DailySharing] 窗口 [{p1}] 和 [{p2}] 完全重叠且过窄，无法拉开间隔")
+
+            if not conflict_found:
+                break
+
+        result = {}
+        for period_str, data in parsed.items():
+            result[period_str] = data["timestamp"]
+
+        return result
 
     def get_curr_period(self) -> TimePeriod:
         h = datetime.now().hour
