@@ -39,6 +39,17 @@ class ContentService:
         self._daymind_not_found = False
         self._dayflow_plugin = None
         self._dayflow_not_found = False
+        self._session: aiohttp.ClientSession | None = None
+
+    async def _get_session(self) -> aiohttp.ClientSession:
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession()
+        return self._session
+
+    async def close(self):
+        if self._session and not self._session.closed:
+            await self._session.close()
+            self._session = None
 
     def _parse_str_list_to_dict(self, data_list: List[str]) -> Dict[str, List[str]]:
         """
@@ -506,8 +517,8 @@ class ContentService:
         }
 
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, headers=headers, json=payload, timeout=10) as resp:
+            session = await self._get_session()
+            async with session.post(url, headers=headers, json=payload, timeout=10) as resp:
                     if resp.status == 200:
                         data = await resp.json()
                         

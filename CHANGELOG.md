@@ -1,3 +1,16 @@
+### v5.6.5
+
+** 稳定性优化：连接泄漏修复 + 并发安全 + 资源复用**
+
+*   修复数据库连接泄漏：所有同步 DB 方法增加 	ry/finally，确保异常时连接也会关闭，防止长时间运行后文件描述符耗尽
+*   修复 aiohttp Session 未复用：NewsService 和 ContentService 改为懒初始化共享 Session，不再每次 HTTP 请求新建/销毁，插件卸载时正确关闭
+*   修复后台任务未追踪：新增 _spawn_bg_task() 统一创建并追踪后台任务，替换 6 处裸 syncio.create_task，确保插件卸载时所有后台任务都能被取消
+*   修复 QZone monkey-patch 并发不安全：新增 _qzone_lock 互斥锁，防止多个 QQ空间分享并发时互相覆盖 download_file 补丁
+*   修复 LLM 降级状态竞态：移除实例级 _temp_fallback_provider，降级状态改为每次 LLM 调用独立的局部变量，多人格并发分享互不干扰
+*   清理死代码：移除从未使用的 _persona_cache 实例变量
+
+---
+
 ### v5.6.4
 
 **🐛 TTS 人格名获取修复 + 视频发送重试**

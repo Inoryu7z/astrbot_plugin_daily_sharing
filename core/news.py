@@ -10,6 +10,17 @@ class NewsService:
         self.config = config
         self.conf = self.config.get("news_conf", {})
         self.plugin = plugin
+        self._session: aiohttp.ClientSession | None = None
+
+    async def _get_session(self) -> aiohttp.ClientSession:
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession()
+        return self._session
+
+    async def close(self):
+        if self._session and not self._session.closed:
+            await self._session.close()
+            self._session = None
 
     def _get_current_period(self) -> TimePeriod:
         from datetime import datetime
@@ -205,13 +216,13 @@ class NewsService:
         logger.debug(f"[新闻] 请求URL: {url}?format=json&apikey=***{extra_params}")
         
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(full_url, timeout=timeout) as resp:
-                    if resp.status != 200: 
-                        logger.warning(f"[新闻] API返回状态码: {resp.status}")
-                        if resp.status in (401, 403):
-                            logger.error("[新闻] API密钥无效或已过期！")
-                        return None
+            session = await self._get_session()
+            async with session.get(full_url, timeout=timeout) as resp:
+                if resp.status != 200: 
+                    logger.warning(f"[新闻] API返回状态码: {resp.status}")
+                    if resp.status in (401, 403):
+                        logger.error("[新闻] API密钥无效或已过期！")
+                    return None
                     
                     data = await resp.json(content_type=None)
                     parsed = self._parse_response(data)
@@ -337,8 +348,8 @@ class NewsService:
         logger.debug(f"[百科] 查询: {keyword}")
         
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, params=params, timeout=10) as resp:
+            session = await self._get_session()
+            async with session.get(url, params=params, timeout=10) as resp:
                     if resp.status != 200: return None
                     
                     try:
@@ -382,8 +393,8 @@ class NewsService:
             
         url = f"https://api.nycnm.cn/API/aizixun.php?format=json&apikey={key}"
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=10) as resp:
+            session = await self._get_session()
+            async with session.get(url, timeout=10) as resp:
                     if resp.status == 200:
                         data = await resp.json(content_type=None)
                         

@@ -22,6 +22,7 @@ class TaskManager:
         self.news_service = plugin.news_service
         self.image_service = plugin.image_service
         self.content_service = plugin.content_service
+        self._qzone_lock = asyncio.Lock()
         self._get_lock = plugin._get_lock
         
         self.basic_conf = plugin.basic_conf
@@ -31,6 +32,12 @@ class TaskManager:
         self.tts_conf = plugin.tts_conf
         self.context_conf = plugin.context_conf
         self.receiver_conf = plugin.receiver_conf
+
+    def _spawn_bg_task(self, coro):
+        task = asyncio.create_task(coro)
+        self.plugin._bg_tasks.add(task)
+        task.add_done_callback(self.plugin._bg_tasks.discard)
+        return task
 
     def setup_tasks(self):
         personas = self.plugin.get_enabled_personas()
@@ -53,7 +60,7 @@ class TaskManager:
                     else:
                         daily_sched_id = "daily_random_scheduler"
                         self._setup_cron_job_custom(daily_sched_id, "0 0 * * *", self._make_persona_daily_random_scheduler(None))
-                        asyncio.create_task(self._make_persona_daily_random_scheduler(None)())
+                        self._spawn_bg_task(self._make_persona_daily_random_scheduler(None)())
                     self.setup_custom_target_crons(persona_name=None)
                     logger.debug(f"[DailySharing] 全局分享任务已启动 (与人格任务并行, 模式: {trigger_mode})")
         else:
@@ -65,7 +72,7 @@ class TaskManager:
                 else:
                     daily_sched_id = "daily_random_scheduler"
                     self._setup_cron_job_custom(daily_sched_id, "0 0 * * *", self._make_persona_daily_random_scheduler(None))
-                    asyncio.create_task(self._make_persona_daily_random_scheduler(None)())
+                    self._spawn_bg_task(self._make_persona_daily_random_scheduler(None)())
                 self.setup_custom_target_crons(persona_name=None)
                 logger.debug(f"[DailySharing] 单人格模式：分享内容定时任务已启动 (模式: {trigger_mode})")
 
@@ -77,7 +84,7 @@ class TaskManager:
             self._setup_cron_job_custom("share_briefing", cron_briefing, self._task_wrapper_briefing)
             logger.debug(f"[DailySharing] 早报定时任务已启动 ({cron_briefing})")
 
-        asyncio.create_task(self._recover_pending_jobs())
+        self._spawn_bg_task(self._recover_pending_jobs())
 
     def _setup_persona_tasks(self, persona_name: str, persona_entry: dict):
         if not self.plugin.config.get("enable_auto_sharing", False):
@@ -100,7 +107,7 @@ class TaskManager:
             job_id_prefix = f"persona_{persona_name}_"
             daily_sched_id = f"{job_id_prefix}daily_random_scheduler"
             self._setup_cron_job_custom(daily_sched_id, "0 0 * * *", self._make_persona_daily_random_scheduler(persona_name))
-            asyncio.create_task(self._make_persona_daily_random_scheduler(persona_name)())
+            self._spawn_bg_task(self._make_persona_daily_random_scheduler(persona_name)())
             logger.debug(f"[DailySharing] 人格 [{persona_name}] 已启用多时间段随机生成模式")
 
         self.setup_custom_target_crons(persona_name=persona_name)
@@ -321,7 +328,7 @@ class TaskManager:
         elif trigger_mode == "random_period":
             sched_id = f"daily_random_scheduler_{persona_name}" if persona_name else "daily_random_scheduler"
             self._setup_cron_job_custom(sched_id, "0 0 * * *", self._make_persona_daily_random_scheduler(persona_name))
-            asyncio.create_task(self._make_persona_daily_random_scheduler(persona_name)())
+            self._spawn_bg_task(self._make_persona_daily_random_scheduler(persona_name)())
             logger.debug(f"[DailySharing] {'人格 ['+persona_name+'] ' if persona_name else ''}已启用多时间段随机生成模式")
 
     def setup_qzone_cron(self, persona_name=None):
@@ -343,7 +350,7 @@ class TaskManager:
         elif trigger_mode == "random_period":
             sched_id = f"daily_qzone_random_scheduler_{persona_name}" if persona_name else "daily_qzone_random_scheduler"
             self._setup_cron_job_custom(sched_id, "0 0 * * *", self._make_persona_qzone_random_scheduler(persona_name))
-            asyncio.create_task(self._make_persona_qzone_random_scheduler(persona_name)())
+            self._spawn_bg_task(self._make_persona_qzone_random_scheduler(persona_name)())
             logger.debug(f"[DailySharing] {'人格 ['+persona_name+'] ' if persona_name else ''}QQ空间已启用多时间段随机生成模式")
 
     def _make_task_wrapper(self, persona_name=None):
@@ -1554,53 +1561,54 @@ class TaskManager:
                     qzone_utils_mod = mod
                     break
                     
-            if qzone_utils_mod:
-                orig_download_file = qzone_utils_mod.download_file
-                async def patched_download_file(url: str):
-                    if isinstance(url, str) and url.startswith("local_path::"):
-                        real_path = url.split("::", 1)[1]
-                        try:
-                            async with aiofiles.open(real_path, "rb") as f:
-                                return await f.read()  
-                        except Exception:
-                            return None
-                    return await orig_download_file(url)
-                qzone_utils_mod.download_file = patched_download_file
-                
-            try:
-                await qzone_plugin.service.publish_post(
-                    text=clean_qzone_content,
-                    images=qzone_images
-                )
-                logger.info("[DailySharing] 成功分享内容到QQ空间！")
-                
-                await self.db.add_sent_history(
-                    target_id="qzone_broadcast",
-                    sharing_type=stype.value,
-                    content=clean_qzone_content[:100] + "...",
-                    success=True,
-                    persona_name=persona_name or ""
-                )
-                
-                if event:
-                    try:
-                        text_chain = MessageChain().message(clean_qzone_content)
-                        await event.send(text_chain)
-                        
-                        if target_local_img:
-                            await asyncio.sleep(1.0) 
-                            img_chain = MessageChain()
-                            if target_local_img.startswith("http"):
-                                img_chain.url_image(target_local_img)
-                            else:
-                                img_chain.file_image(target_local_img)
-                            await event.send(img_chain)
-                    except Exception as e:
-                        logger.error(f"[DailySharing] 同步发送内容到会话失败: {e}")
-                
-            finally:
+            async with self._qzone_lock:
                 if qzone_utils_mod:
-                    qzone_utils_mod.download_file = orig_download_file
+                    orig_download_file = qzone_utils_mod.download_file
+                    async def patched_download_file(url: str):
+                        if isinstance(url, str) and url.startswith("local_path::"):
+                            real_path = url.split("::", 1)[1]
+                            try:
+                                async with aiofiles.open(real_path, "rb") as f:
+                                    return await f.read()  
+                            except Exception:
+                                return None
+                        return await orig_download_file(url)
+                    qzone_utils_mod.download_file = patched_download_file
+                    
+                try:
+                    await qzone_plugin.service.publish_post(
+                        text=clean_qzone_content,
+                        images=qzone_images
+                    )
+                    logger.info("[DailySharing] 成功分享内容到QQ空间！")
+                    
+                    await self.db.add_sent_history(
+                        target_id="qzone_broadcast",
+                        sharing_type=stype.value,
+                        content=clean_qzone_content[:100] + "...",
+                        success=True,
+                        persona_name=persona_name or ""
+                    )
+                    
+                    if event:
+                        try:
+                            text_chain = MessageChain().message(clean_qzone_content)
+                            await event.send(text_chain)
+                            
+                            if target_local_img:
+                                await asyncio.sleep(1.0) 
+                                img_chain = MessageChain()
+                                if target_local_img.startswith("http"):
+                                    img_chain.url_image(target_local_img)
+                                else:
+                                    img_chain.file_image(target_local_img)
+                                await event.send(img_chain)
+                        except Exception as e:
+                            logger.error(f"[DailySharing] 同步发送内容到会话失败: {e}")
+                        
+                finally:
+                    if qzone_utils_mod:
+                        qzone_utils_mod.download_file = orig_download_file
 
         except Exception as e:
             logger.error(f"[DailySharing] 生成并分享到QQ空间失败: {e}")

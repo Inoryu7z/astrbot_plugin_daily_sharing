@@ -52,9 +52,6 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
         # 缓存 Adapter ID 
         self._cached_adapter_id = None 
 
-        # 临时降级第一个模型缓存
-        self._temp_fallback_provider = None
-
         # 任务追踪 (用于生命周期清理)
         self._bg_tasks = set()
         
@@ -94,9 +91,6 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
         self._bg_tasks.add(bot_init_task)
         bot_init_task.add_done_callback(self._bg_tasks.discard)
 
-        # 多人格支持
-        self._persona_cache = {}
-    
     def _get_lock(self, persona_name: str = None) -> asyncio.Lock:
         key = persona_name or "_default"
         if key not in self._locks:
@@ -193,14 +187,15 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
         """插件卸载/重载时的清理逻辑"""
         self._is_terminated = True 
         try:
-            # 1. 停止调度器
             if self.scheduler.running:
                 self.scheduler.shutdown(wait=False)
             
-            # 2. 取消所有后台任务
             for task in self._bg_tasks:
                 if not task.done():
                     task.cancel()
+
+            await self.news_service.close()
+            await self.content_service.close()
             
             logger.info("[DailySharing] 插件已停止，清理资源完成")
         except Exception as e:
@@ -294,9 +289,6 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
             user_provider_id = self.llm_conf.get("llm_provider_id", "")
             config_timeout = self.llm_conf.get("llm_timeout", 60)
 
-        if self._temp_fallback_provider:
-            user_provider_id = self._temp_fallback_provider
-
         current_provider_id = user_provider_id if user_provider_id else _get_system_default_provider()
 
         actual_timeout = max(timeout, config_timeout)
@@ -304,14 +296,12 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
         for attempt in range(max_retries + 1):
             if self._is_terminated: return None
             
-            # 降级逻辑 1
             is_last_attempt = (attempt == max_retries)
             if is_last_attempt and attempt > 0 and user_provider_id and current_provider_id == user_provider_id:
                 default_pid = _get_system_default_provider()
                 if default_pid and default_pid != current_provider_id:
                     logger.info(f"[DailySharing] 指定 LLM 已达到重试次数，降级使用默认的第一个模型({default_pid})...")
                     current_provider_id = default_pid
-                    self._temp_fallback_provider = default_pid 
 
             try:
                 kwargs = {"prompt": prompt}
@@ -332,7 +322,6 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
                 if resp and hasattr(resp, 'completion_text'):
                     result = resp.completion_text.strip()
                     if result:
-                        self._temp_fallback_provider = None
                         return result
                     
             except asyncio.TimeoutError:
@@ -355,7 +344,6 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
                         if default_pid and default_pid != current_provider_id:
                             logger.info(f"[DailySharing] 遇到 401 错误，降级使用默认的第一个模型({default_pid})...")
                             current_provider_id = default_pid
-                            self._temp_fallback_provider = default_pid 
                             await asyncio.sleep(2)
                             continue
                         else:
