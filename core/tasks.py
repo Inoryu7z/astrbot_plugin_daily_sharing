@@ -1651,15 +1651,23 @@ class TaskManager:
         
         # 3. 分享视觉媒体（视频优先，其次图片）
         if video_url:
-            try:
-                video_chain = MessageChain()
-                if video_url.startswith("http"):
-                    video_chain.chain.append(Video.fromURL(video_url))
-                else:
-                    video_chain.chain.append(Video.fromFileSystem(video_url))              
-                await self.plugin.context.send_message(uid, video_chain)
-            except Exception as e:
-                logger.error(f"[DailySharing] 发送视频给 {uid} 失败: {e}")
+            max_video_retries = 3
+            for video_attempt in range(max_video_retries):
+                try:
+                    video_chain = MessageChain()
+                    if video_url.startswith("http"):
+                        video_chain.chain.append(Video.fromURL(video_url))
+                    else:
+                        video_chain.chain.append(Video.fromFileSystem(video_url))
+                    await self.plugin.context.send_message(uid, video_chain)
+                    break
+                except Exception as e:
+                    if video_attempt < max_video_retries - 1:
+                        wait_sec = 3 * (video_attempt + 1)
+                        logger.warning(f"[DailySharing] 发送视频给 {uid} 失败 (尝试 {video_attempt+1}/{max_video_retries}): {e}，{wait_sec}s 后重试...")
+                        await asyncio.sleep(wait_sec)
+                    else:
+                        logger.error(f"[DailySharing] 发送视频给 {uid} 失败 (已重试{max_video_retries}次): {e}")
         elif img_path:
             img_not_sent_yet = separate_img or audio_path or not should_send_text or not clean_text
             if img_not_sent_yet:

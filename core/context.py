@@ -187,9 +187,19 @@ class ContextService:
                 if persona_mgr:
                     persona_obj = await persona_mgr.get_default_persona_v3(target_umo)
                     if persona_obj:
-                        persona_name = str(getattr(persona_obj, "name", "") or getattr(persona_obj, "persona_id", "") or "").strip()
+                        if isinstance(persona_obj, dict):
+                            persona_name = str(persona_obj.get("name", "") or persona_obj.get("persona_id", "") or "").strip()
+                        else:
+                            persona_name = str(getattr(persona_obj, "name", "") or getattr(persona_obj, "persona_id", "") or "").strip()
             except Exception:
                 pass
+
+            if not persona_name and self.plugin:
+                entries = self.plugin.get_enabled_personas()
+                if entries:
+                    first_name = entries[0].get("persona_name") or entries[0].get("name") or entries[0].get("select_persona", "")
+                    if first_name:
+                        persona_name = self.plugin._canonical_persona_name(first_name) or first_name
 
         if not persona_name:
             logger.warning("[DailySharing] 无法获取当前人格名称，跳过 TTS")
