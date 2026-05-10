@@ -1,8 +1,7 @@
 import os
 import re
-import json
 from datetime import datetime
-from typing import Optional, Dict, List
+from typing import Optional
 from astrbot.api import logger
 from ..config import SharingType, TimePeriod
 
@@ -73,8 +72,8 @@ class ImageService:
 
     # ==================== 1. 核心逻辑：Agent 提取 ====================
 
-    async def _agent_extract_visuals(self, content: str, life_context: str, persona_name: str = None) -> Dict[str, str]:
-        if not content and not life_context: return {}
+    async def _agent_extract_visuals(self, content: str, life_context: str, persona_name: str = None) -> Optional[str]:
+        if not content and not life_context: return None
 
         now = datetime.now()
         curr_hour = now.hour
@@ -107,7 +106,7 @@ class ImageService:
                 logger.info("[DailySharing] 视觉导演使用默认提示词模板")
             system_prompt = self._get_default_visual_director_prompt(logic_prompt, curr_hour)
 
-        user_prompt = f"【分享文案】：{content}\n【生活日程】：{life_context}\n\n请提取视觉元素："
+        user_prompt = f"【分享文案】：{content}\n【生活日程】：{life_context}\n\n请生成绘画提示词："
 
         if self.debug_mode:
             logger.info("-" * 60)
@@ -121,61 +120,48 @@ class ImageService:
             if self.debug_mode:
                 logger.info(f"[DailySharing] 【DEBUG】Agent 原始回复: {res}")
 
-            if not res: return {}
-            clean_json = res.replace("```json", "").replace("```", "").strip()
-            match = re.search(r"\{.*\}", clean_json, re.DOTALL)
-            if match: clean_json = match.group(0)
-            return json.loads(clean_json)
+            if not res: return None
+            clean = res.strip()
+            if clean.startswith("```"):
+                clean = re.sub(r"^```\w*\n?", "", clean)
+                clean = re.sub(r"\n?```$", "", clean)
+            return clean.strip() or None
         except Exception as e:
             logger.warning(f"[DailySharing] Agent 提取失败: {e}")
-            return {}
+            return None
 
     def _get_default_visual_director_prompt(self, logic_prompt: str, curr_hour: int) -> str:
-        return f"""你是 AI 绘画视觉导演。从用户的【分享文案】和【生活日程】中提取画面关键词。
+        return f"""你是 AI 绘画视觉导演。从用户的【分享文案】和【生活日程】中提取画面信息，生成一段完整的 AI 绘画提示词。
 
 当前时间：{curr_hour}:00。确保场景的光线和活动类型与当前时间吻合。
 
 {logic_prompt}
 严禁提取 {curr_hour}:00 之后的日程作为当前场景。
 
-【输出铁律】
-只输出相机镜头能直接拍到的内容：颜色、形状、材质、光线、空间关系。
-禁止：情绪词、氛围渲染、抽象状态、嗅觉听觉。
+【输出格式】
+输出一段连贯的自然语言段落，直接作为 AI 绘画提示词。禁止输出 JSON、禁止使用分类标签（如"内搭：""外穿：""风格："等元标记）。
 
-【字段要求】
+段落必须以这句话开头：
+"以前三张参考图中同一少女为基准，完整保留少女五官、身材等全部人体身份特征，绝对禁止任何拼图，为少女生成一张新的写真：她有着白皙细腻的皮肤，纤细的身姿与格外饱满的曲线形成鲜明对比，"
 
-穿搭 (outfit) —— 最重要，画面核心
-逐件描述服装，区分内搭/外穿，每件给出：款式 + 颜色 + 材质 + 版型特征。
-差："一身暗黑系穿搭，神秘优雅" ← 这是总结，不是描述
+段落必须以这句话结尾：
+"完全保留少女的面部特征与丰满的身材。"
 
-动作 (action) —— 次重要，决定画面生动度
-描述一个能被快门定格的瞬时静态姿势。写出具体的身体部位在做什么。
-差："正在卸妆，动作轻柔" ← 太笼统，没有具体姿态
+【必须包含的视觉要素】
+段落中必须依次覆盖以下要素，用自然语言句子衔接，不要用词组堆砌：
+1. 穿搭：逐件描述她穿着的服装，每件给出款式、颜色、材质、版型，用"她穿着……"等自然句式
+2. 动作：描述一个能被快门定格的瞬时静态姿势，写出具体身体部位在做什么
+3. 构图：景别、视角、镜头效果
+4. 环境：具体地点和场景内的可见物体
+5. 光影：光源类型、方向、颜色、明暗分布
 
-构图 (composition)
-景别（特写/半身/全身）、视角（平视/俯拍/仰拍）、镜头效果（景深/虚化/广角）。
-差："营造亲密的视觉感受"
+如果文案推荐了具体物品，在动作或穿搭描述中自然融入。
 
-环境 (environment)
-具体地点 + 场景内的可见物体（家具、摆设、墙色、窗等）。用物体定位空间。
-差："温馨的卧室，宁静的氛围"
-
-光影 (lighting)
-光源类型（日光/台灯/顶灯/窗光）、方向、颜色、画面的明暗分布。
-差："柔和的灯光营造出温馨氛围"
-
-主体 (subject)
-若文案推荐具体物品则描述该物品；纯风景或画人时填"无"。
-
-请严格输出 JSON：
-{{
-    "outfit": "...",       // 穿搭的详细描述——逐件列出，区分内外搭，每件写款式、颜色、材质、版型
-    "action": "...",       // 动作描述——具体身体部位在做什么，能被快门定格的一个瞬时静态姿势
-    "composition": "...",  // 构图——景别、视角、镜头效果
-    "environment": "...",  // 环境——具体地点和可见物体
-    "lighting": "...",     // 光影——光源类型、方向、颜色、明暗分布
-    "subject": "..."       // 主体物品描述，纯风景或画人时填"无"
-}}"""
+【禁止】
+- 禁止元概念：不写情绪词、氛围渲染、抽象状态、嗅觉听觉
+- 禁止词组堆砌：不用"棉质材质，浅粉色配色"这种离散词组，改用"一件浅粉色的棉质……"等自然句子
+- 禁止分类标签：不用"内搭：""外穿：""风格："等元标记
+- 禁止输出 JSON 或任何格式标记"""
 
     # ==================== 2. 主入口 ====================
 
@@ -187,30 +173,22 @@ class ImageService:
 
         logger.info(f"[DailySharing] 配图决策: 自拍模式 ({logic_str}) | 类型: {sharing_type.value}")
 
-        visuals = {}
+        prompt = None
         if content or life_context:
-            visuals = await self._agent_extract_visuals(content, life_context, persona_name=persona_name)
+            prompt = await self._agent_extract_visuals(content, life_context, persona_name=persona_name)
 
-            if not visuals:
-                logger.warning("[DailySharing] Agent 提取失败，已取消配图，仅发送文案")
+            if not prompt:
+                logger.warning("[DailySharing] 视觉导演生成失败，已取消配图，仅发送文案")
                 return None
 
-            env = visuals.get('environment', '无')
-            subj = visuals.get('subject', '无')
-            outfit = visuals.get('outfit', '无')
-            comp = visuals.get('composition', '无')
-            logger.info(f"[DailySharing] Agent 提取 -> 主体: {subj} | 环境: {env} | 构图: {comp} | 穿搭: {outfit[:15] if outfit else '无'}...")
-
-        prompt = self._assemble_selfie_prompt(content, sharing_type, visuals)
+            logger.info(f"[DailySharing] 视觉导演生成 Prompt: {prompt[:80]}...")
 
         if not prompt:
-            logger.warning("[DailySharing] Prompt 组装失败，取消配图")
+            logger.warning("[DailySharing] Prompt 为空，取消配图")
             return None
-        logger.info(f"[DailySharing] 最终配图 Prompt: {prompt[:100]}...")
 
         max_sensitive_retries = 2
         current_prompt = prompt
-        current_visuals = visuals
 
         for attempt in range(1 + max_sensitive_retries):
             result, is_sensitive = await self._call_aiimg_selfie(current_prompt, persona_name=persona_name)
@@ -225,14 +203,14 @@ class ImageService:
 
             if attempt < max_sensitive_retries:
                 logger.warning(f"[DailySharing] 配图因敏感内容被拦截 (第{attempt+1}次)，正在重新生成提示词...")
-                current_prompt, current_visuals = await self._regenerate_prompt_avoiding_sensitive(
-                    content, sharing_type, life_context, current_visuals, current_prompt, persona_name
+                current_prompt = await self._regenerate_prompt_avoiding_sensitive(
+                    content, life_context, current_prompt, persona_name
                 )
                 if not current_prompt:
                     logger.warning("[DailySharing] 重新生成提示词失败，放弃配图")
                     self._last_image_description = None
                     return None
-                logger.info(f"[DailySharing] 重试配图 Prompt: {current_prompt[:100]}...")
+                logger.info(f"[DailySharing] 重试配图 Prompt: {current_prompt[:80]}...")
             else:
                 logger.warning(f"[DailySharing] 配图因敏感内容被拦截，已重试{max_sensitive_retries}次，放弃配图仅发送文案")
                 self._last_image_description = None
@@ -240,64 +218,6 @@ class ImageService:
 
         self._last_image_description = None
         return None
-
-    def _assemble_selfie_prompt(self, content: str, sharing_type: SharingType, visuals: Dict) -> str:
-        parts = []
-
-        if self.debug_mode:
-            logger.info("+" * 60)
-            logger.info(f"[DailySharing] 【DEBUG】开始组装自拍 Prompt")
-            logger.info(f"[DailySharing] 【DEBUG】Visuals 字典内容: {visuals}")
-
-        def _clean(s: str) -> str:
-            return s.strip().rstrip("。，,").strip()
-
-        subject_str = visuals.get("subject", "")
-        has_subj = subject_str and subject_str not in ["无", "N/A", "None", ""]
-
-        if has_subj:
-            parts.append(f"手持或展示{_clean(subject_str)}")
-
-        outfit = visuals.get("outfit", "")
-        if outfit:
-            outfit_clean = _clean(outfit)
-            if outfit_clean.startswith("穿着") or outfit_clean.startswith("身穿"):
-                parts.append(outfit_clean)
-            else:
-                parts.append(f"穿着{outfit_clean}")
-
-        action = visuals.get("action", "")
-        if action:
-            parts.append(_clean(action))
-
-        composition = visuals.get("composition", "")
-        if composition:
-            parts.append(_clean(composition))
-
-        env = visuals.get("environment", "")
-        if env:
-            env_clean = _clean(env)
-            if env_clean.startswith("在") or env_clean.startswith("位于"):
-                env_clean = env_clean.lstrip("在位于")
-            parts.append(f"位于{env_clean}")
-
-        lighting = visuals.get("lighting", "")
-        if lighting:
-            parts.append(_clean(lighting))
-        else:
-            period = self._get_current_period()
-            if period in [TimePeriod.NIGHT, TimePeriod.LATE_NIGHT]:
-                parts.append("夜晚城市灯光")
-            else:
-                parts.append("白天自然光")
-
-        result = "，".join(filter(None, parts))
-
-        if self.debug_mode:
-            logger.info(f"[DailySharing] 【DEBUG】组装完成，最终 Prompt 长度: {len(result)}")
-            logger.info("+" * 60)
-
-        return result
 
     # ==================== 3. 工具函数 ====================
 
@@ -466,9 +386,9 @@ class ImageService:
         return None
 
     async def _regenerate_prompt_avoiding_sensitive(
-        self, content: str, sharing_type: SharingType, life_context: str,
-        old_visuals: Dict, old_prompt: str, persona_name: str = None
-    ):
+        self, content: str, life_context: str,
+        old_prompt: str, persona_name: str = None
+    ) -> Optional[str]:
         retry_prompt = (
             "你之前为以下内容生成的配图提示词被图片生成服务的安全策略拦截了，"
             "可能是因为描述中包含了过于暴露的服装、暗示性姿势、或其他敏感元素。\n\n"
@@ -484,40 +404,26 @@ class ImageService:
             retry_prompt += f"\n生活上下文：{life_context}\n"
 
         retry_prompt += (
-            "\n请严格输出 JSON：\n"
-            "{\n"
-            '    "outfit": "...",\n'
-            '    "action": "...",\n'
-            '    "composition": "...",\n'
-            '    "environment": "...",\n'
-            '    "lighting": "...",\n'
-            '    "subject": "..."\n'
-            "}"
+            "\n输出要求与视觉导演提示词相同：一段连贯的自然语言段落，"
+            "以\"以前三张参考图中同一少女为基准，完整保留少女五官、身材等全部人体身份特征，绝对禁止任何拼图，为少女生成一张新的写真：她有着白皙细腻的皮肤，纤细的身姿与格外饱满的曲线形成鲜明对比，\"开头，"
+            "以\"完全保留少女的面部特征与丰满的身材。\"结尾。"
+            "禁止输出 JSON 或任何格式标记。"
         )
 
         result = await self.call_llm(
             retry_prompt,
-            system_prompt="你是一个专业的配图导演。你的任务是为分享内容设计安全、健康的配图描述。之前的设计因敏感内容被拦截，你必须大幅降低敏感度。",
+            system_prompt="你是一个专业的配图导演。你的任务是为分享内容设计安全、健康的配图描述。之前的设计因敏感内容被拦截，你必须大幅降低敏感度。输出一段连贯的自然语言段落，不要输出 JSON。",
             persona_name=persona_name,
         )
 
         if not result:
-            return None, {}
+            return None
 
-        new_visuals = {}
-        try:
-            json_match = re.search(r'\{[\s\S]*\}', result)
-            if json_match:
-                new_visuals = json.loads(json_match.group())
-        except (json.JSONDecodeError, Exception):
-            logger.warning("[DailySharing] 敏感内容重试：解析新视觉描述失败")
-            return None, {}
-
-        if not new_visuals:
-            return None, {}
-
-        new_prompt = self._assemble_selfie_prompt(content, sharing_type, new_visuals)
-        return new_prompt, new_visuals
+        clean = result.strip()
+        if clean.startswith("```"):
+            clean = re.sub(r"^```\w*\n?", "", clean)
+            clean = re.sub(r"\n?```$", "", clean)
+        return clean.strip() or None
 
     async def _call_aiimg_selfie(self, prompt: str, persona_name: str = None):
         self._ensure_plugin()
@@ -566,23 +472,14 @@ class ImageService:
                 return None, False
 
             size = None
-            prompt_prefix = ""
             if hasattr(aiimg, "_get_persona_selfie_config"):
                 persona_conf = aiimg._get_persona_selfie_config(resolved_persona)
                 if persona_conf:
                     default_output = str(persona_conf.get("default_output", "") or "").strip()
                     if default_output:
                         size = default_output
-                    prompt_prefix = str(persona_conf.get("prompt_prefix", "") or "").strip()
 
             final_prompt = prompt
-            if hasattr(aiimg, "_build_selfie_prompt"):
-                final_prompt = aiimg._build_selfie_prompt(prompt, extra_refs=0, prompt_prefix=prompt_prefix)
-            else:
-                if prompt_prefix:
-                    final_prompt = f"{prompt_prefix}\n\n{prompt}"
-                else:
-                    final_prompt = f"以参考图中同一少女为基准，完整保留其五官、身材等全部人体特征，绝对禁止任何拼图，参考她的面部特征为其生成一张单人的自然生活照：她有着白皙细腻的皮肤，纤细的身姿与格外饱满的曲线形成鲜明对比，{prompt}"
 
             if self.debug_mode:
                 logger.info("=" * 60)
@@ -591,7 +488,6 @@ class ImageService:
                 logger.info(f"[DailySharing] 【DEBUG】参考图数量: {len(ref_images)}")
                 logger.info(f"[DailySharing] 【DEBUG】服务商链路: {[x.get('provider_id') for x in chain_override if isinstance(x, dict)]}")
                 logger.info(f"[DailySharing] 【DEBUG】输出尺寸: {size or 'default'}")
-                logger.info(f"[DailySharing] 【DEBUG】提示词前缀: {prompt_prefix or '(无)'}")
                 logger.info(f"[DailySharing] 【DEBUG】完整 Prompt:\n{final_prompt}")
                 logger.info("=" * 60)
 
