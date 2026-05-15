@@ -1,3 +1,14 @@
+### v5.6.7
+
+**🐛 修复 QQ 空间定时任务从未被注册的三个叠加 Bug**
+
+*   修复 `setup_tasks` 中缺少全局级 QQ 空间任务注册：无人格模式或全局级 qzone 任务永远不会被调度
+*   修复 `_setup_persona_tasks` 中 `has_targets` 提前 return 阻止 QQ 空间注册：QQ 空间是独立目标，不应被群聊/私聊目标检查阻断
+*   修复人格级 `enable_qzone` 默认值 `"false"` 阻止回退到全局配置：新增 `_resolve_persona_qzone_enabled` 方法，正确处理三值逻辑
+*   修复 `_conf_schema.json` 中 6 个人格级布尔字段默认值从 `"false"` 改为 `""`，确保未显式设置时回退到全局配置
+
+---
+
 ### v5.6.6
 
 **🎨 视觉导演提示词重构：自然语言段落输出**

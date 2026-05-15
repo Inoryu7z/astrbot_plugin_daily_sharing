@@ -63,6 +63,9 @@ class TaskManager:
                         self._spawn_bg_task(self._make_persona_daily_random_scheduler(None)())
                     self.setup_custom_target_crons(persona_name=None)
                     logger.debug(f"[DailySharing] 全局分享任务已启动 (与人格任务并行, 模式: {trigger_mode})")
+
+            if self.qzone_conf.get("enable_qzone", False):
+                self.setup_qzone_cron(persona_name=None)
         else:
             if self.plugin.config.get("enable_auto_sharing", False):
                 trigger_mode = self.basic_conf.get("trigger_mode", "random_period")
@@ -75,6 +78,9 @@ class TaskManager:
                     self._spawn_bg_task(self._make_persona_daily_random_scheduler(None)())
                 self.setup_custom_target_crons(persona_name=None)
                 logger.debug(f"[DailySharing] 单人格模式：分享内容定时任务已启动 (模式: {trigger_mode})")
+
+            if self.qzone_conf.get("enable_qzone", False):
+                self.setup_qzone_cron(persona_name=None)
 
         enable_60s = self.extra_shares_conf.get("enable_60s_news", False)
         enable_ai = self.extra_shares_conf.get("enable_ai_news", False)
@@ -90,11 +96,18 @@ class TaskManager:
         if not self.plugin.config.get("enable_auto_sharing", False):
             return
 
+        qzone_enabled = self._resolve_persona_qzone_enabled(persona_name)
+        if qzone_enabled:
+            self.setup_qzone_cron(persona_name=persona_name)
+
         persona_receiver = self.plugin.get_persona_receiver(persona_name)
         has_targets = bool(persona_receiver.get("groups") or persona_receiver.get("users"))
 
         if not has_targets:
-            logger.debug(f"[DailySharing] 人格 [{persona_name}] 未配置接收对象，跳过定时任务")
+            if qzone_enabled:
+                logger.debug(f"[DailySharing] 人格 [{persona_name}] 仅启用QQ空间任务（无群聊/私聊目标）")
+            else:
+                logger.debug(f"[DailySharing] 人格 [{persona_name}] 未配置接收对象，跳过定时任务")
             return
 
         persona_basic = persona_entry.get("persona_basic_conf", {})
@@ -111,13 +124,6 @@ class TaskManager:
             logger.debug(f"[DailySharing] 人格 [{persona_name}] 已启用多时间段随机生成模式")
 
         self.setup_custom_target_crons(persona_name=persona_name)
-
-        persona_qzone = persona_entry.get("persona_qzone_conf", {})
-        qzone_enabled = persona_qzone.get("enable_qzone", "")
-        if isinstance(qzone_enabled, str):
-            qzone_enabled = qzone_enabled.lower() == "true" if qzone_enabled else self.qzone_conf.get("enable_qzone", False)
-        if qzone_enabled:
-            self.setup_qzone_cron(persona_name=persona_name)
 
         logger.debug(f"[DailySharing] 人格 [{persona_name}] 定时任务已挂载")
 
@@ -330,6 +336,25 @@ class TaskManager:
             self._setup_cron_job_custom(sched_id, "0 0 * * *", self._make_persona_daily_random_scheduler(persona_name))
             self._spawn_bg_task(self._make_persona_daily_random_scheduler(persona_name)())
             logger.debug(f"[DailySharing] {'人格 ['+persona_name+'] ' if persona_name else ''}已启用多时间段随机生成模式")
+
+    def _resolve_persona_qzone_enabled(self, persona_name):
+        global_val = self.qzone_conf.get("enable_qzone", False)
+        item = self.plugin._find_persona_config(persona_name)
+        if item is None:
+            return global_val
+        persona_qzone = item.get("persona_qzone_conf", {})
+        if not isinstance(persona_qzone, dict):
+            return global_val
+        val = persona_qzone.get("enable_qzone")
+        if val is None or val == "":
+            return global_val
+        if isinstance(val, bool):
+            return val
+        if isinstance(val, str):
+            if val.lower() == "true":
+                return True
+            return global_val
+        return global_val
 
     def setup_qzone_cron(self, persona_name=None):
         qzone_conf = self.qzone_conf
