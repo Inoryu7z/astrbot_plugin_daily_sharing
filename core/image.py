@@ -471,13 +471,11 @@ class ImageService:
                 logger.error(f"[DailySharing] 人格「{resolved_persona}」未配置自拍服务商链路。请在 aiimg 插件的 WebUI 中为该人格配置 chain。")
                 return None, False
 
-            size = None
+            persona_default_output = ""
             if hasattr(aiimg, "_get_persona_selfie_config"):
                 persona_conf = aiimg._get_persona_selfie_config(resolved_persona)
                 if persona_conf:
-                    default_output = str(persona_conf.get("default_output", "") or "").strip()
-                    if default_output:
-                        size = default_output
+                    persona_default_output = str(persona_conf.get("default_output", "") or "").strip()
 
             final_prompt = prompt
 
@@ -487,7 +485,7 @@ class ImageService:
                 logger.info(f"[DailySharing] 【DEBUG】人格: {resolved_persona}")
                 logger.info(f"[DailySharing] 【DEBUG】参考图数量: {len(ref_images)}")
                 logger.info(f"[DailySharing] 【DEBUG】服务商链路: {[x.get('provider_id') for x in chain_override if isinstance(x, dict)]}")
-                logger.info(f"[DailySharing] 【DEBUG】输出尺寸: {size or 'default'}")
+                logger.info(f"[DailySharing] 【DEBUG】输出尺寸: {persona_default_output or 'default'}")
                 logger.info(f"[DailySharing] 【DEBUG】完整 Prompt:\n{final_prompt}")
                 logger.info("=" * 60)
 
@@ -495,7 +493,8 @@ class ImageService:
                 prompt=final_prompt,
                 images=ref_images,
                 backend=None,
-                size=size,
+                size=None,
+                default_output=persona_default_output,
                 chain_override=chain_override,
             )
 
