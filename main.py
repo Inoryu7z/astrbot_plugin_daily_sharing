@@ -101,6 +101,16 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
         entries = self._persona_entries()
         return [e for e in entries if e.get("enabled", True)]
 
+    _CONF_KEY_TO_GLOBAL = {
+        "persona_basic_conf": "basic_conf",
+        "persona_qzone_conf": "qzone_conf",
+        "persona_image_conf": "image_conf",
+        "persona_tts_conf": "tts_conf",
+        "persona_context_conf": "context_conf",
+        "persona_news_conf": "news_conf",
+        "persona_llm_conf": "llm_conf",
+    }
+
     def get_persona_config_value(self, persona_name: str, conf_key: str, sub_key: str, default=None, int_fallback_sentinel=None):
         item = self._find_persona_config(persona_name)
         if item is not None:
@@ -116,7 +126,8 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
                     if isinstance(val, str) and val.lower() in ("true", "false"):
                         return val.lower() == "true"
                     return val
-        global_conf = self.config.get(conf_key, {})
+        global_key = self._CONF_KEY_TO_GLOBAL.get(conf_key, conf_key)
+        global_conf = self.config.get(global_key, {})
         if isinstance(global_conf, dict):
             return global_conf.get(sub_key, default)
         return default

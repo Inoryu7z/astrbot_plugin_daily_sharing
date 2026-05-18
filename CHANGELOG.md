@@ -1,3 +1,11 @@
+### v5.6.8
+
+**🐛 修复人格级配置全局回退 key 映射错误**
+
+*   修复 `get_persona_config_value` 全局回退时用人格级 conf_key（如 `persona_qzone_conf`）读取 `self.config`，但全局配置的 key 是 `qzone_conf`，导致全局配置永远读不到，最终回退到硬编码默认值（包含 recommendation 等用户未设置的类型）
+
+---
+
 ### v5.6.7
 
 **🐛 修复 QQ 空间定时任务从未被注册的三个叠加 Bug**
