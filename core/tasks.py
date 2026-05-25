@@ -64,8 +64,15 @@ class TaskManager:
                     self.setup_custom_target_crons(persona_name=None)
                     logger.debug(f"[DailySharing] 全局分享任务已启动 (与人格任务并行, 模式: {trigger_mode})")
 
-            if self.qzone_conf.get("enable_qzone", False):
+            any_persona_qzone = any(
+                self._resolve_persona_qzone_enabled(
+                    e.get("persona_name") or e.get("name") or e.get("select_persona", "")
+                )
+                for e in personas
+            )
+            if self.qzone_conf.get("enable_qzone", False) and not any_persona_qzone:
                 self.setup_qzone_cron(persona_name=None)
+                logger.debug("[DailySharing] 所有人格均未启用QQ空间，回退到全局QQ空间任务")
         else:
             if self.plugin.config.get("enable_auto_sharing", False):
                 trigger_mode = self.basic_conf.get("trigger_mode", "random_period")
@@ -353,6 +360,8 @@ class TaskManager:
         if isinstance(val, str):
             if val.lower() == "true":
                 return True
+            if val.lower() == "false":
+                return False
             return global_val
         return global_val
 
@@ -362,7 +371,16 @@ class TaskManager:
             item = self.plugin._find_persona_config(persona_name)
             if item:
                 persona_qzone = item.get("persona_qzone_conf", {})
-                qzone_conf = {**self.qzone_conf, **{k: v for k, v in persona_qzone.items() if v not in ("", [], -1)}}
+                old_defaults = self.plugin._OLD_SCHEMA_DEFAULTS.get("persona_qzone_conf", {})
+                merged = {}
+                for k, v in persona_qzone.items():
+                    if v in ("", [], -1):
+                        continue
+                    old_val = old_defaults.get(k)
+                    if old_val is not None and v == old_val:
+                        continue
+                    merged[k] = v
+                qzone_conf = {**self.qzone_conf, **merged}
 
         trigger_mode = qzone_conf.get("qzone_trigger_mode", "random_period")
         
@@ -1487,7 +1505,8 @@ class TaskManager:
 
             self.plugin._inject_qzone_client(qzone_plugin)
             period = self.get_curr_period()
-            stype = force_type if force_type else await self.decide_type_with_state(period, is_qzone=True, persona_name=persona_name) 
+            qzone_specific_type = self.plugin.get_persona_config_value(persona_name, "persona_qzone_conf", "qzone_sharing_type", None) or self.qzone_conf.get("qzone_sharing_type", "auto")
+            stype = force_type if force_type else await self.decide_type_with_state(period, is_qzone=True, specific_type=qzone_specific_type, persona_name=persona_name) 
             logger.info(f"[DailySharing]{' ['+persona_name+']' if persona_name else ''} QQ空间时段: {period.value}, 类型: {stype.value}")
 
             life_ctx = await self.ctx_service.get_life_context(persona_name=persona_name)
