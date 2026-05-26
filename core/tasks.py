@@ -1703,7 +1703,7 @@ class TaskManager:
         
         # 3. 分享视觉媒体（视频优先，其次图片）
         if video_url:
-            max_video_retries = 3
+            max_video_retries = 2
             for video_attempt in range(max_video_retries):
                 try:
                     video_chain = MessageChain()
@@ -1714,6 +1714,17 @@ class TaskManager:
                     await self.plugin.context.send_message(uid, video_chain)
                     break
                 except Exception as e:
+                    err_repr = repr(e).lower()
+                    err_str = str(e).lower()
+                    is_timeout_likely_sent = (
+                        "timeout" in err_repr
+                        or "timeout" in err_str
+                        or "retcode=1200" in err_repr
+                        or "retcode=1200" in err_str
+                    )
+                    if is_timeout_likely_sent:
+                        logger.warning(f"[DailySharing] 发送视频给 {uid} 遇到超时错误，消息可能已送达，不再重试: {e}")
+                        break
                     if video_attempt < max_video_retries - 1:
                         wait_sec = 3 * (video_attempt + 1)
                         logger.warning(f"[DailySharing] 发送视频给 {uid} 失败 (尝试 {video_attempt+1}/{max_video_retries}): {e}，{wait_sec}s 后重试...")
