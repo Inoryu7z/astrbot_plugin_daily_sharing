@@ -1590,7 +1590,7 @@ class TaskManager:
                 if target_local_img.startswith("http"):
                     qzone_images.append(target_local_img)
                 else:
-                    qzone_images.append(target_local_img)
+                    qzone_images.append({"source": target_local_img, "kind": "image", "trusted_local": True})
             
             await qzone_plugin.controller.publish_post(
                 content=clean_qzone_content,

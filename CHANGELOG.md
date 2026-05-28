@@ -1,3 +1,12 @@
+### v5.7.0
+
+**🔄 适配 QZone v4.0.0 Daemon API + 修复本地图片发布失败**
+
+*   适配 QZone 插件 v4.0.0 Daemon 架构重构：`service.publish_post()` → `controller.publish_post()`
+*   修复 QQ 空间 AI 配图发布失败：本地图片路径缺少 `trusted_local=True`，daemon 拒绝读取本地文件，现改为 dict 格式传入
+
+---
+
 ### v5.6.9
 
 **🐛 修复视频发送超时误判导致重复发送**

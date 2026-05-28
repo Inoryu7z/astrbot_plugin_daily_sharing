@@ -61,7 +61,7 @@
               "trigger_mode": {
                 "description": "触发模式",
                 "type": "string",
-                "default": "random_period",
+                "default": "",
                 "options": [
                   "",
                   "random_period",
@@ -72,13 +72,13 @@
               "sharing_cron": {
                 "description": "Cron表达式",
                 "type": "string",
-                "default": "0 8,20 * * *",
+                "default": "",
                 "hint": "仅cron模式生效，如 0 8,20 * * * 表示每天8点和20点。默认与全局相同，可修改"
               },
               "sharing_type": {
                 "description": "分享类型策略",
                 "type": "string",
-                "default": "auto",
+                "default": "",
                 "options": [
                   "",
                   "auto",
@@ -98,10 +98,7 @@
                 "items": {
                   "type": "string"
                 },
-                "default": [
-                  "08:00-10:00",
-                  "19:00-21:00"
-                ],
+                "default": [],
                 "hint": "仅random_period模式生效。格式：HH:MM-HH:MM。默认与全局相同，可修改"
               },
               "dawn_sequence": {
@@ -110,10 +107,7 @@
                 "items": {
                   "type": "string"
                 },
-                "default": [
-                  "dream",
-                  "mood"
-                ],
+                "default": [],
                 "hint": "auto模式下智能选择，无需按顺序填。候选：greeting,news,mood,life_moment,rant,dream,recommendation。默认与全局相同，可修改"
               },
               "morning_sequence": {
@@ -122,9 +116,7 @@
                 "items": {
                   "type": "string"
                 },
-                "default": [
-                  "greeting"
-                ],
+                "default": [],
                 "hint": "auto模式下智能选择，无需按顺序填。候选：greeting,news,mood,life_moment,rant,dream,recommendation。默认与全局相同，可修改"
               },
               "forenoon_sequence": {
@@ -133,10 +125,7 @@
                 "items": {
                   "type": "string"
                 },
-                "default": [
-                  "news",
-                  "life_moment"
-                ],
+                "default": [],
                 "hint": "auto模式下智能选择，无需按顺序填。候选：greeting,news,mood,life_moment,rant,dream,recommendation。默认与全局相同，可修改"
               },
               "afternoon_sequence": {
@@ -145,11 +134,7 @@
                 "items": {
                   "type": "string"
                 },
-                "default": [
-                  "news",
-                  "life_moment",
-                  "rant"
-                ],
+                "default": [],
                 "hint": "auto模式下智能选择，无需按顺序填。候选：greeting,news,mood,life_moment,rant,dream,recommendation。默认与全局相同，可修改"
               },
               "evening_sequence": {
@@ -158,10 +143,7 @@
                 "items": {
                   "type": "string"
                 },
-                "default": [
-                  "recommendation",
-                  "life_moment"
-                ],
+                "default": [],
                 "hint": "auto模式下智能选择，无需按顺序填。候选：greeting,news,mood,life_moment,rant,dream,recommendation。默认与全局相同，可修改"
               },
               "night_sequence": {
@@ -170,10 +152,7 @@
                 "items": {
                   "type": "string"
                 },
-                "default": [
-                  "recommendation",
-                  "mood"
-                ],
+                "default": [],
                 "hint": "auto模式下智能选择，无需按顺序填。候选：greeting,news,mood,life_moment,rant,dream,recommendation。默认与全局相同，可修改"
               },
               "late_night_sequence": {
@@ -182,10 +161,7 @@
                 "items": {
                   "type": "string"
                 },
-                "default": [
-                  "mood",
-                  "dream"
-                ],
+                "default": [],
                 "hint": "auto模式下智能选择，无需按顺序填。候选：greeting,news,mood,life_moment,rant,dream,recommendation。默认与全局相同，可修改"
               }
             }
@@ -205,7 +181,7 @@
               "llm_timeout": {
                 "description": "生成超时(秒)",
                 "type": "int",
-                "default": 120,
+                "default": 0,
                 "hint": "该人格的LLM生成内容最大等待时间（秒）。0表示回退全局"
               },
               "persona_id": {
@@ -239,13 +215,7 @@
                 "items": {
                   "type": "string"
                 },
-                "default": [
-                  "greeting",
-                  "mood",
-                  "life_moment",
-                  "dream",
-                  "recommendation"
-                ],
+                "default": [],
                 "hint": "仅当分享类型在列表中时才会生成图片。默认与全局相同，可修改"
               },
               "enable_ai_video": {
@@ -290,10 +260,7 @@
                 "items": {
                   "type": "string"
                 },
-                "default": [
-                  "greeting",
-                  "mood"
-                ],
+                "default": [],
                 "hint": "仅当分享类型在列表中时才会生成语音。默认与全局相同，可修改"
               }
             }
@@ -317,7 +284,7 @@
               "qzone_trigger_mode": {
                 "description": "说说触发模式",
                 "type": "string",
-                "default": "random_period",
+                "default": "",
                 "options": [
                   "",
                   "random_period",
@@ -328,13 +295,13 @@
               "qzone_cron": {
                 "description": "说说Cron表达式",
                 "type": "string",
-                "default": "0 20 * * *",
+                "default": "",
                 "hint": "仅cron模式生效，如 0 20 * * * 表示每天20点。默认与全局相同，可修改"
               },
               "qzone_sharing_type": {
                 "description": "说说分享模式",
                 "type": "string",
-                "default": "auto",
+                "default": "",
                 "options": [
                   "",
                   "auto",
@@ -354,10 +321,7 @@
                 "items": {
                   "type": "string"
                 },
-                "default": [
-                  "08:00-10:00",
-                  "19:00-21:00"
-                ],
+                "default": [],
                 "hint": "仅random_period模式生效。格式：HH:MM-HH:MM。默认与全局相同，可修改"
               },
               "qzone_enable_image": {
@@ -377,10 +341,7 @@
                 "items": {
                   "type": "string"
                 },
-                "default": [
-                  "dream",
-                  "mood"
-                ],
+                "default": [],
                 "hint": "auto模式下智能选择，无需按顺序填。候选：greeting,news,mood,life_moment,rant,dream,recommendation。默认与全局相同，可修改"
               },
               "qzone_morning_sequence": {
@@ -389,10 +350,7 @@
                 "items": {
                   "type": "string"
                 },
-                "default": [
-                  "mood",
-                  "life_moment"
-                ],
+                "default": [],
                 "hint": "auto模式下智能选择，无需按顺序填。候选：greeting,news,mood,life_moment,rant,dream,recommendation。默认与全局相同，可修改"
               },
               "qzone_forenoon_sequence": {
@@ -401,10 +359,7 @@
                 "items": {
                   "type": "string"
                 },
-                "default": [
-                  "life_moment",
-                  "rant"
-                ],
+                "default": [],
                 "hint": "auto模式下智能选择，无需按顺序填。候选：greeting,news,mood,life_moment,rant,dream,recommendation。默认与全局相同，可修改"
               },
               "qzone_afternoon_sequence": {
@@ -413,10 +368,7 @@
                 "items": {
                   "type": "string"
                 },
-                "default": [
-                  "life_moment",
-                  "rant"
-                ],
+                "default": [],
                 "hint": "auto模式下智能选择，无需按顺序填。候选：greeting,news,mood,life_moment,rant,dream,recommendation。默认与全局相同，可修改"
               },
               "qzone_evening_sequence": {
@@ -425,10 +377,7 @@
                 "items": {
                   "type": "string"
                 },
-                "default": [
-                  "life_moment",
-                  "recommendation"
-                ],
+                "default": [],
                 "hint": "auto模式下智能选择，无需按顺序填。候选：greeting,news,mood,life_moment,rant,dream,recommendation。默认与全局相同，可修改"
               },
               "qzone_night_sequence": {
@@ -437,10 +386,7 @@
                 "items": {
                   "type": "string"
                 },
-                "default": [
-                  "mood",
-                  "recommendation"
-                ],
+                "default": [],
                 "hint": "auto模式下智能选择，无需按顺序填。候选：greeting,news,mood,life_moment,rant,dream,recommendation。默认与全局相同，可修改"
               },
               "qzone_late_night_sequence": {
@@ -449,10 +395,7 @@
                 "items": {
                   "type": "string"
                 },
-                "default": [
-                  "mood",
-                  "dream"
-                ],
+                "default": [],
                 "hint": "auto模式下智能选择，无需按顺序填。候选：greeting,news,mood,life_moment,rant,dream,recommendation。默认与全局相同，可修改"
               }
             }
@@ -465,7 +408,7 @@
               "enable_life_context": {
                 "description": "启用生活上下文",
                 "type": "string",
-                "default": "true",
+                "default": "",
                 "options": [
                   "",
                   "true",
@@ -476,7 +419,7 @@
               "life_context_in_group": {
                 "description": "启用群聊拟人化人设",
                 "type": "string",
-                "default": "true",
+                "default": "",
                 "options": [
                   "",
                   "true",
@@ -498,7 +441,7 @@
               "reference_history_count": {
                 "description": "参考历史动态数",
                 "type": "int",
-                "default": 3,
+                "default": -1,
                 "hint": "生成新动态时参考最近N次历史，保持人设连贯并避免重复。-1表示回退全局"
               }
             }
@@ -511,7 +454,7 @@
               "news_random_mode": {
                 "description": "新闻热搜源模式",
                 "type": "string",
-                "default": "config",
+                "default": "",
                 "options": [
                   "",
                   "fixed",
@@ -527,17 +470,13 @@
                 "items": {
                   "type": "string"
                 },
-                "default": [
-                  "zhihu",
-                  "weibo",
-                  "bili"
-                ],
+                "default": [],
                 "hint": "config/time_based模式生效，推荐2-5个。默认与全局相同，可修改"
               },
               "news_api_source": {
                 "description": "固定新闻热搜源",
                 "type": "string",
-                "default": "zhihu",
+                "default": "",
                 "options": [
                   "",
                   "zhihu",
