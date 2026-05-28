@@ -1006,10 +1006,9 @@ class TaskManager:
                     
                 if to_qzone:
                     qzone_plugin = self.ctx_service._find_plugin("qzone")
-                    if qzone_plugin and hasattr(qzone_plugin, "service"):
-                        self.plugin._inject_qzone_client(qzone_plugin)
+                    if qzone_plugin and hasattr(qzone_plugin, "controller") and qzone_plugin.controller is not None:
                         try:
-                            await qzone_plugin.service.publish_post(text="【每天60秒读懂世界】", images=[url])
+                            await qzone_plugin.controller.publish_post(content="【每天60秒读懂世界】", media=[url], content_sanitized=True)
                             await event.send(event.plain_result("每天60s读世界 已成功分享到QQ空间！"))
                             await self.db.add_sent_history("qzone_broadcast", "news", "【每天60秒读懂世界】", True)
                         except Exception as e:
@@ -1034,10 +1033,9 @@ class TaskManager:
                     
                 if to_qzone:
                     qzone_plugin = self.ctx_service._find_plugin("qzone")
-                    if qzone_plugin and hasattr(qzone_plugin, "service"):
-                        self.plugin._inject_qzone_client(qzone_plugin)
+                    if qzone_plugin and hasattr(qzone_plugin, "controller") and qzone_plugin.controller is not None:
                         try:
-                            await qzone_plugin.service.publish_post(text="【AI资讯快报】", images=[url])
+                            await qzone_plugin.controller.publish_post(content="【AI资讯快报】", media=[url], content_sanitized=True)
                             await event.send(event.plain_result("AI资讯快报 已成功分享到QQ空间！"))
                             await self.db.add_sent_history("qzone_broadcast", "news", "【AI资讯快报】", True)
                         except Exception as e:
@@ -1100,10 +1098,9 @@ class TaskManager:
                     if img_url:
                         if to_qzone:
                             qzone_plugin = self.ctx_service._find_plugin("qzone")
-                            if qzone_plugin and hasattr(qzone_plugin, "service"):
-                                self.plugin._inject_qzone_client(qzone_plugin)
+                            if qzone_plugin and hasattr(qzone_plugin, "controller") and qzone_plugin.controller is not None:
                                 try:
-                                    await qzone_plugin.service.publish_post(text=f"【{src_name}】", images=[img_url])
+                                    await qzone_plugin.controller.publish_post(content=f"【{src_name}】", media=[img_url], content_sanitized=True)
                                     await event.send(event.plain_result(f"[{src_name}] 图片已成功分享到QQ空间！"))
                                     await self.db.add_sent_history("qzone_broadcast", "news", f"【{src_name}】长图(LLM)", True)
                                 except Exception as e:
@@ -1264,13 +1261,12 @@ class TaskManager:
         # 定时早报自动同步到QQ空间
         if specific_target is None and self.extra_shares_conf.get("sync_briefing_to_qzone", False):
             qzone_plugin = self.ctx_service._find_plugin("qzone")
-            if qzone_plugin and hasattr(qzone_plugin, "service"):
-                self.plugin._inject_qzone_client(qzone_plugin)
+            if qzone_plugin and hasattr(qzone_plugin, "controller") and qzone_plugin.controller is not None:
                 logger.info("[DailySharing] 分享早报到QQ空间已开启...")
                 for name, url in images_to_send:
                     try:
                         title = "【每天60秒读懂世界】" if "60s" in name else "【AI资讯快报】"
-                        await qzone_plugin.service.publish_post(text=title, images=[url])
+                        await qzone_plugin.controller.publish_post(content=title, media=[url], content_sanitized=True)
                         await self.db.add_sent_history("qzone_broadcast", "news", f"{title}(定时自动)", True)
                         await asyncio.sleep(3) 
                         logger.info(f"[DailySharing] 分享早报 {name} 到QQ空间成功！")
@@ -1497,13 +1493,12 @@ class TaskManager:
         
         try:
             qzone_plugin = self.ctx_service._find_plugin("qzone")
-            if not qzone_plugin or not hasattr(qzone_plugin, "service"):
-                logger.warning("[DailySharing] QQ空间任务触发，但未检测到 astrbot_plugin_qzone 插件")
+            if not qzone_plugin or not hasattr(qzone_plugin, "controller") or qzone_plugin.controller is None:
+                logger.warning("[DailySharing] QQ空间任务触发，但未检测到 astrbot_plugin_qzone 插件或 controller 不可用")
                 if event:
-                    await event.send(event.plain_result("未检测到 astrbot_plugin_qzone 插件"))
+                    await event.send(event.plain_result("未检测到 astrbot_plugin_qzone 插件或 controller 不可用"))
                 return
 
-            self.plugin._inject_qzone_client(qzone_plugin)
             period = self.get_curr_period()
             qzone_specific_type = self.plugin.get_persona_config_value(persona_name, "persona_qzone_conf", "qzone_sharing_type", None) or self.qzone_conf.get("qzone_sharing_type", "auto")
             stype = force_type if force_type else await self.decide_type_with_state(period, is_qzone=True, specific_type=qzone_specific_type, persona_name=persona_name) 
@@ -1595,64 +1590,38 @@ class TaskManager:
                 if target_local_img.startswith("http"):
                     qzone_images.append(target_local_img)
                 else:
-                    qzone_images.append(f"local_path::{target_local_img}")
-                            
-            import sys
-            import aiofiles
-            qzone_utils_mod = None
-            for mod_name, mod in sys.modules.items():
-                if "qzone" in mod_name and "utils" in mod_name and hasattr(mod, "download_file"):
-                    qzone_utils_mod = mod
-                    break
-                    
-            async with self._qzone_lock:
-                if qzone_utils_mod:
-                    orig_download_file = qzone_utils_mod.download_file
-                    async def patched_download_file(url: str):
-                        if isinstance(url, str) and url.startswith("local_path::"):
-                            real_path = url.split("::", 1)[1]
-                            try:
-                                async with aiofiles.open(real_path, "rb") as f:
-                                    return await f.read()  
-                            except Exception:
-                                return None
-                        return await orig_download_file(url)
-                    qzone_utils_mod.download_file = patched_download_file
-                    
+                    qzone_images.append(target_local_img)
+            
+            await qzone_plugin.controller.publish_post(
+                content=clean_qzone_content,
+                media=qzone_images,
+                content_sanitized=True
+            )
+            logger.info("[DailySharing] 成功分享内容到QQ空间！")
+            
+            await self.db.add_sent_history(
+                target_id="qzone_broadcast",
+                sharing_type=stype.value,
+                content=clean_qzone_content[:100] + "...",
+                success=True,
+                persona_name=persona_name or ""
+            )
+            
+            if event:
                 try:
-                    await qzone_plugin.service.publish_post(
-                        text=clean_qzone_content,
-                        images=qzone_images
-                    )
-                    logger.info("[DailySharing] 成功分享内容到QQ空间！")
+                    text_chain = MessageChain().message(clean_qzone_content)
+                    await event.send(text_chain)
                     
-                    await self.db.add_sent_history(
-                        target_id="qzone_broadcast",
-                        sharing_type=stype.value,
-                        content=clean_qzone_content[:100] + "...",
-                        success=True,
-                        persona_name=persona_name or ""
-                    )
-                    
-                    if event:
-                        try:
-                            text_chain = MessageChain().message(clean_qzone_content)
-                            await event.send(text_chain)
-                            
-                            if target_local_img:
-                                await asyncio.sleep(1.0) 
-                                img_chain = MessageChain()
-                                if target_local_img.startswith("http"):
-                                    img_chain.url_image(target_local_img)
-                                else:
-                                    img_chain.file_image(target_local_img)
-                                await event.send(img_chain)
-                        except Exception as e:
-                            logger.error(f"[DailySharing] 同步发送内容到会话失败: {e}")
-                        
-                finally:
-                    if qzone_utils_mod:
-                        qzone_utils_mod.download_file = orig_download_file
+                    if target_local_img:
+                        await asyncio.sleep(1.0) 
+                        img_chain = MessageChain()
+                        if target_local_img.startswith("http"):
+                            img_chain.url_image(target_local_img)
+                        else:
+                            img_chain.file_image(target_local_img)
+                        await event.send(img_chain)
+                except Exception as e:
+                    logger.error(f"[DailySharing] 同步发送内容到会话失败: {e}")
 
         except Exception as e:
             logger.error(f"[DailySharing] 生成并分享到QQ空间失败: {e}")

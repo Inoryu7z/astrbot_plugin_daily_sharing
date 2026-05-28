@@ -459,10 +459,9 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
             if is_qzone_target:
                 yield event.plain_result("正在分享每天60s读世界到QQ空间...")
                 qzone_plugin = self.ctx_service._find_plugin("qzone")
-                if qzone_plugin and hasattr(qzone_plugin, "service"):
-                    self._inject_qzone_client(qzone_plugin)
+                if qzone_plugin and hasattr(qzone_plugin, "controller") and qzone_plugin.controller is not None:
                     try:
-                        await qzone_plugin.service.publish_post(text="【每天60秒读懂世界】", images=[url])
+                        await qzone_plugin.controller.publish_post(content="【每天60秒读懂世界】", media=[url], content_sanitized=True)
                         yield event.plain_result("每天60s读世界已成功分享到QQ空间！")
                         await self.db.add_sent_history("qzone_broadcast", "news", "【每天60秒读懂世界】(手动)", True)
                     except Exception as e:
@@ -495,10 +494,9 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
             if is_qzone_target:
                 yield event.plain_result("正在分享AI资讯快报到QQ空间...")
                 qzone_plugin = self.ctx_service._find_plugin("qzone")
-                if qzone_plugin and hasattr(qzone_plugin, "service"):
-                    self._inject_qzone_client(qzone_plugin)
+                if qzone_plugin and hasattr(qzone_plugin, "controller") and qzone_plugin.controller is not None:
                     try:
-                        await qzone_plugin.service.publish_post(text="【AI资讯快报】", images=[url])
+                        await qzone_plugin.controller.publish_post(content="【AI资讯快报】", media=[url], content_sanitized=True)
                         yield event.plain_result("AI资讯快报已成功分享到QQ空间！")
                         await self.db.add_sent_history("qzone_broadcast", "news", "【AI资讯快报】(手动)", True)
                     except Exception as e:
@@ -585,10 +583,9 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
                     if is_qzone_target:
                         yield event.plain_result(f"正在获取[{src_name}]图片并分享到QQ空间...")
                         qzone_plugin = self.ctx_service._find_plugin("qzone")
-                        if qzone_plugin and hasattr(qzone_plugin, "service"):
-                            self._inject_qzone_client(qzone_plugin)
+                        if qzone_plugin and hasattr(qzone_plugin, "controller") and qzone_plugin.controller is not None:
                             try:
-                                await qzone_plugin.service.publish_post(text=f"【{src_name}】", images=[img_url])
+                                await qzone_plugin.controller.publish_post(content=f"【{src_name}】", media=[img_url], content_sanitized=True)
                                 yield event.plain_result("QQ空间分享成功！")
                                 await self.db.add_sent_history("qzone_broadcast", "news", f"【{src_name}】长图(手动)", True)
                             except Exception as e:
