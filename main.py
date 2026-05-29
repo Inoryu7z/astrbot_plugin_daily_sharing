@@ -136,8 +136,11 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
         item = self._find_persona_config(persona_name)
         if item is not None:
             pr = item.get("persona_receiver", {})
-            if isinstance(pr, dict) and (pr.get("groups") or pr.get("users") or pr.get("adapter_id")):
-                return pr
+            if isinstance(pr, dict):
+                if pr.get("disable_chat_sharing"):
+                    return {"groups": [], "users": []}
+                if pr.get("groups") or pr.get("users") or pr.get("adapter_id"):
+                    return pr
         return self.receiver_conf
 
     async def resolve_persona_from_event(self, event) -> str:

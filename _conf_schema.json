@@ -23,8 +23,14 @@
             "title": "分享目标",
             "description": "该人格的独立分享目标",
             "type": "object",
-            "hint": "为该人格指定独立的分享目标。留空则回退到全局 receiver 配置",
+            "hint": "为该人格指定独立的分享目标。留空则回退到全局 receiver 配置。开启「禁用聊天分享」可让该人格不分享到任何群聊/私聊",
             "items": {
+              "disable_chat_sharing": {
+                "title": "禁用聊天分享",
+                "type": "bool",
+                "default": false,
+                "hint": "开启后该人格不会自动分享到任何群聊或私聊（QQ空间分享不受影响），无需清空群聊/私聊列表"
+              },
               "adapter_id": {
                 "title": "目标适配器ID",
                 "type": "string",
@@ -1329,13 +1335,6 @@
         "type": "bool",
         "default": true,
         "hint": "开启后分享内容会使用系统人设语气和性格，更加生动自然"
-      },
-      "persona_id": {
-        "description": "指定人设ID",
-        "type": "string",
-        "default": "",
-        "hint": "可选择已配置的人设，留空则使用当前会话的默认系统人设",
-        "_special": "select_persona"
       }
     }
   },

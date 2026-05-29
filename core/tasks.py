@@ -41,14 +41,21 @@ class TaskManager:
 
     def setup_tasks(self):
         personas = self.plugin.get_enabled_personas()
+        logger.info(f"[DailySharing] 开始注册定时任务，共 {len(personas)} 个人格条目")
 
         if personas:
             for persona_entry in personas:
                 pname = persona_entry.get("persona_name") or persona_entry.get("name") or persona_entry.get("select_persona", "")
                 if not pname:
+                    logger.warning("[DailySharing] 跳过无人格标识的条目")
                     continue
                 canonical = self.plugin._canonical_persona_name(pname) or pname
-                self._setup_persona_tasks(canonical, persona_entry)
+                try:
+                    self._setup_persona_tasks(canonical, persona_entry)
+                except Exception as e:
+                    logger.error(f"[DailySharing] 人格 [{canonical}] 任务注册失败: {e}")
+                    import traceback
+                    logger.error(traceback.format_exc())
 
             if self.plugin.config.get("enable_auto_sharing", False):
                 has_global_targets = bool(self.receiver_conf.get("groups") or self.receiver_conf.get("users"))
@@ -101,20 +108,30 @@ class TaskManager:
 
     def _setup_persona_tasks(self, persona_name: str, persona_entry: dict):
         if not self.plugin.config.get("enable_auto_sharing", False):
+            logger.info(f"[DailySharing] 人格 [{persona_name}] 自动分享未启用，跳过")
             return
 
         qzone_enabled = self._resolve_persona_qzone_enabled(persona_name)
+        logger.info(f"[DailySharing] 人格 [{persona_name}] QQ空间={'启用' if qzone_enabled else '未启用'}")
         if qzone_enabled:
             self.setup_qzone_cron(persona_name=persona_name)
+
+        raw_item = self.plugin._find_persona_config(persona_name)
+        raw_pr = raw_item.get("persona_receiver", {}) if raw_item else {}
+        is_disabled = bool(raw_pr.get("disable_chat_sharing")) if isinstance(raw_pr, dict) else False
+
+        if is_disabled:
+            logger.info(f"[DailySharing] 人格 [{persona_name}] 已禁用聊天分享（disable_chat_sharing=True）")
+            return
 
         persona_receiver = self.plugin.get_persona_receiver(persona_name)
         has_targets = bool(persona_receiver.get("groups") or persona_receiver.get("users"))
 
         if not has_targets:
             if qzone_enabled:
-                logger.debug(f"[DailySharing] 人格 [{persona_name}] 仅启用QQ空间任务（无群聊/私聊目标）")
+                logger.info(f"[DailySharing] 人格 [{persona_name}] 仅启用QQ空间任务（无群聊/私聊目标）")
             else:
-                logger.debug(f"[DailySharing] 人格 [{persona_name}] 未配置接收对象，跳过定时任务")
+                logger.info(f"[DailySharing] 人格 [{persona_name}] 未配置接收对象，跳过定时任务")
             return
 
         persona_basic = persona_entry.get("persona_basic_conf", {})
@@ -371,13 +388,9 @@ class TaskManager:
             item = self.plugin._find_persona_config(persona_name)
             if item:
                 persona_qzone = item.get("persona_qzone_conf", {})
-                old_defaults = self.plugin._OLD_SCHEMA_DEFAULTS.get("persona_qzone_conf", {})
                 merged = {}
                 for k, v in persona_qzone.items():
                     if v in ("", [], -1):
-                        continue
-                    old_val = old_defaults.get(k)
-                    if old_val is not None and v == old_val:
                         continue
                     merged[k] = v
                 qzone_conf = {**self.qzone_conf, **merged}

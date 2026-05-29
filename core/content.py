@@ -210,8 +210,6 @@ class ContentService:
             persona_id = ""
             if persona_name and self.plugin:
                 persona_id = self.plugin.get_persona_config_value(persona_name, "persona_llm_conf", "persona_id", "")
-            if not persona_id:
-                persona_id = self.llm_conf.get("persona_id", "")
 
             persona_mgr = getattr(self.context, "persona_manager", None)
 
