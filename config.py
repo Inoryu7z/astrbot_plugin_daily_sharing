@@ -183,27 +183,32 @@ SHARING_TYPE_SEQUENCES = {
     ],
     TimePeriod.MORNING: [
         SharingType.GREETING.value,
+        SharingType.LIFE_MOMENT.value,
+        SharingType.RANT.value,
     ],
     TimePeriod.FORENOON: [
         SharingType.NEWS.value,
         SharingType.LIFE_MOMENT.value,
+        SharingType.RANT.value,
     ],
     TimePeriod.AFTERNOON: [
-        SharingType.NEWS.value,
         SharingType.LIFE_MOMENT.value,
         SharingType.RANT.value,
     ],
     TimePeriod.EVENING: [
-        SharingType.RECOMMENDATION.value,
+        SharingType.MOOD.value,
+        SharingType.RANT.value,
         SharingType.LIFE_MOMENT.value,
     ],
     TimePeriod.NIGHT: [
-        SharingType.RECOMMENDATION.value,
+        SharingType.GREETING.value,
+        SharingType.LIFE_MOMENT.value,
+        SharingType.RANT.value,
         SharingType.MOOD.value,
     ],
     TimePeriod.LATE_NIGHT: [
         SharingType.MOOD.value,
-        SharingType.DREAM.value,
+        SharingType.RANT.value,
     ],
 }
 
@@ -216,6 +221,7 @@ QZONE_SHARING_TYPE_SEQUENCES = {
     TimePeriod.MORNING: [
         SharingType.MOOD.value,
         SharingType.LIFE_MOMENT.value,
+        SharingType.RANT.value,
     ],
     TimePeriod.FORENOON: [
         SharingType.LIFE_MOMENT.value,
@@ -227,15 +233,15 @@ QZONE_SHARING_TYPE_SEQUENCES = {
     ],
     TimePeriod.EVENING: [
         SharingType.LIFE_MOMENT.value,
-        SharingType.RECOMMENDATION.value,
+        SharingType.RANT.value,
     ],
     TimePeriod.NIGHT: [
         SharingType.MOOD.value,
-        SharingType.RECOMMENDATION.value,
+        SharingType.RANT.value,
     ],
     TimePeriod.LATE_NIGHT: [
         SharingType.MOOD.value,
-        SharingType.DREAM.value,
+        SharingType.RANT.value,
     ],
 }
 

@@ -17,8 +17,6 @@ class ImageService:
         self._wardrobe_plugin_not_found = False
         self._last_image_description = None
 
-        self.img_conf = self.config.get("image_conf", {})
-        self.llm_conf = self.config.get("llm_conf", {})
         self.debug_mode = self.config.get("debug_mode", False)
 
     def _get_current_period(self) -> TimePeriod:
@@ -78,7 +76,7 @@ class ImageService:
         now = datetime.now()
         curr_hour = now.hour
 
-        prioritize_text = self.img_conf.get("priority_text_over_schedule", True)
+        prioritize_text = False
 
         if prioritize_text:
             logic_prompt = f"""
@@ -166,10 +164,10 @@ class ImageService:
     # ==================== 2. 主入口 ====================
 
     async def generate_image(self, content: str, sharing_type: SharingType, life_context: str = None, persona_name: str = None) -> Optional[str]:
-        if not self.img_conf.get("enable_ai_image", False): return None
+        if not self.plugin.get_persona_config_value(persona_name, "persona_image_conf", "enable_ai_image", False): return None
 
-        is_text_priority = self.img_conf.get("priority_text_over_schedule", True)
-        logic_str = "文案主导" if is_text_priority else "日程主导"
+        is_text_priority = False
+        logic_str = "日程主导"
 
         logger.info(f"[DailySharing] 配图决策: 自拍模式 ({logic_str}) | 类型: {sharing_type.value}")
 
@@ -241,7 +239,7 @@ class ImageService:
                 if persona_vid_provider:
                     video_provider_id = persona_vid_provider
             if not video_provider_id:
-                video_provider_id = self.img_conf.get("video_llm_provider_id", "").strip() or None
+                video_provider_id = self.plugin.get_persona_config_value(persona_name, "persona_image_conf", "video_llm_provider_id", "") or None
 
             # 调用多模态LLM，直接传本地文件路径，AstrBot会自动处理编码
             resp = await self.call_llm(
@@ -284,7 +282,7 @@ class ImageService:
 以"电影感，高质量，流畅"结尾。"""
 
     async def generate_video_from_image(self, image_path: str, content: str, persona_name: str = None) -> Optional[str]:
-        if not self.img_conf.get("enable_ai_video", False): return None
+        if not self.plugin.get_persona_config_value(persona_name, "persona_image_conf", "enable_ai_video", False): return None
 
         self._ensure_plugin()
         if not self._aiimg_plugin: return None
@@ -298,7 +296,7 @@ class ImageService:
             with open(image_path, "rb") as f: image_bytes = f.read()
             logger.info(f"[DailySharing] 正在将配图转换为视频...")
 
-            if self.img_conf.get("enable_smart_video_prompt", True):
+            if self.plugin.get_persona_config_value(persona_name, "persona_image_conf", "enable_smart_video_prompt", True):
                 video_prompt = await self._analyze_image_for_video(image_path, content, persona_name=persona_name)
             else:
                 video_prompt = self._get_default_video_prompt()

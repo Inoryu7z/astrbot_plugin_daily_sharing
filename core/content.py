@@ -23,17 +23,8 @@ class ContentService:
         self.news_service = news_service
         self.plugin = plugin
         
-        self.content_lib_conf = self.config.get("content_library", {})
-        raw_rec = self.content_lib_conf.get("rec_cats", DEFAULT_REC_CATS)
-        if not raw_rec: raw_rec = DEFAULT_REC_CATS
-        self.rec_cats = self._parse_str_list_to_dict(raw_rec)
-        
-        self.basic_conf = self.config.get("basic_conf", {})
-        self.dedup_days = int(self.basic_conf.get("data_retention_days", 60))
-        
-        self.news_conf = self.config.get("news_conf", {})
-        self.llm_conf = self.config.get("llm_conf", {})
-        self.context_conf = self.config.get("context_conf", {})
+        self.data_retention_days = int(self.config.get("data_retention_days", 60))
+        self._rec_cats_cache = {}
         
         self._daymind_plugin = None
         self._daymind_not_found = False
@@ -69,6 +60,19 @@ class ContentService:
                             tags = [t.strip() for t in tags_str.replace("，", ",").split(",") if t.strip()]
                             if tags:
                                 result[name] = tags
+        return result
+
+    def _get_rec_cats(self, persona_name: str) -> dict:
+        if persona_name and persona_name in self._rec_cats_cache:
+            return self._rec_cats_cache[persona_name]
+        raw_rec = DEFAULT_REC_CATS
+        if persona_name and self.plugin:
+            raw_rec = self.plugin.get_persona_config_value(persona_name, "persona_content_library", "rec_cats", DEFAULT_REC_CATS)
+            if not raw_rec:
+                raw_rec = DEFAULT_REC_CATS
+        result = self._parse_str_list_to_dict(raw_rec)
+        if persona_name:
+            self._rec_cats_cache[persona_name] = result
         return result
 
     async def generate(self, stype: SharingType, period: TimePeriod, 
@@ -137,7 +141,7 @@ class ContentService:
         db_category = "rec"
         
         # 获取最近 N 天使用过的话题
-        used_topics = await self.db.get_used_topics(target_id, db_category, days_limit=self.dedup_days)
+        used_topics = await self.db.get_used_topics(target_id, db_category, days_limit=self.data_retention_days)
         history_str = "、".join(used_topics) if used_topics else "无"
         
         constraint = ""
@@ -207,31 +211,15 @@ class ContentService:
     async def _get_persona_info(self, persona_name: str = None) -> dict:
         info = {"prompt": "", "bot_name": "", "user_name": ""}
         try:
-            persona_id = ""
-            if persona_name and self.plugin:
-                persona_id = self.plugin.get_persona_config_value(persona_name, "persona_llm_conf", "persona_id", "")
-
             persona_mgr = getattr(self.context, "persona_manager", None)
 
-            if persona_name and not persona_id:
-                if persona_mgr:
-                    try:
-                        persona_obj = await persona_mgr.get_persona(persona_name)
-                        if persona_obj:
-                            info["prompt"] = getattr(persona_obj, "system_prompt", "")
-                            info["bot_name"] = getattr(persona_obj, "bot_name", "")
-                            info["user_name"] = getattr(persona_obj, "user_name", "")
-                            return info
-                    except Exception:
-                        pass
-
-            if persona_id and persona_mgr:
+            if persona_name and persona_mgr:
                 try:
-                    persona = await persona_mgr.get_persona(persona_id)
-                    if persona:
-                        info["prompt"] = getattr(persona, "system_prompt", "")
-                        info["bot_name"] = getattr(persona, "bot_name", "")
-                        info["user_name"] = getattr(persona, "user_name", "")
+                    persona_obj = await persona_mgr.get_persona(persona_name)
+                    if persona_obj:
+                        info["prompt"] = getattr(persona_obj, "system_prompt", "")
+                        info["bot_name"] = getattr(persona_obj, "bot_name", "")
+                        info["user_name"] = getattr(persona_obj, "user_name", "")
                         return info
                 except Exception:
                     pass
@@ -275,7 +263,7 @@ class ContentService:
         detect_name = ctx.get('detect_name', '')
         
         # 0. 获取配置
-        allow_detail = self.context_conf.get("group_share_schedule", False)
+        allow_detail = False
 
         # 1. 称呼控制
         address_rule = ""
@@ -374,7 +362,7 @@ class ContentService:
         detect_name = ctx.get('detect_name', '')
 
         # 0. 获取配置
-        allow_detail = self.context_conf.get("group_share_schedule", False)
+        allow_detail = False
         
         # 1. 称呼控制
         address_rule = ""
@@ -549,14 +537,14 @@ class ContentService:
         detect_name = ctx.get('detect_name', '')
 
         # 0. 获取配置
-        allow_detail = self.context_conf.get("group_share_schedule", False)
-        enable_tavily = self.news_conf.get("enable_tavily_search", True)
+        allow_detail = False
+        enable_tavily = self.plugin.get_persona_config_value(ctx.get('persona_name'), "persona_news_conf", "enable_tavily_search", True)
 
         news_list, source_key = news_data
         source_config = NEWS_SOURCE_MAP.get(source_key, {"name": "热搜", "icon": "📰"})
         source_name = source_config["name"]
         
-        items_limit = self.news_conf.get("news_items_count", 5)
+        items_limit = self.plugin.get_persona_config_value(ctx.get('persona_name'), "persona_news_conf", "news_items_count", 5)
         selected_to_search = news_list[:items_limit]
 
         # 并发调用内置的 Tavily 搜索来获取新闻真相
@@ -568,7 +556,7 @@ class ContentService:
             logger.info(f"[内容服务] Tavily 搜索功能已关闭，跳过检索。")
             search_results = [(item.get("title", ""), "") for item in selected_to_search]
         
-        raw_share_count = self.news_conf.get("news_share_count", "1-2")
+        raw_share_count = self.plugin.get_persona_config_value(ctx.get('persona_name'), "persona_news_conf", "news_share_count", "1-2")
         try:
             if isinstance(raw_share_count, int):
                 share_count = raw_share_count
@@ -948,7 +936,7 @@ class ContentService:
         call_name = ctx.get('nickname', '')
         detect_name = ctx.get('detect_name', '')
 
-        allow_detail = self.context_conf.get("group_share_schedule", False)
+        allow_detail = False
 
         address_rule = ""
         user_info_prompt = ""
@@ -1126,12 +1114,15 @@ class ContentService:
         detect_name = ctx.get('detect_name', '')
 
         # 0. 获取配置
-        allow_detail = self.context_conf.get("group_share_schedule", False)
-        enable_tavily = self.news_conf.get("enable_tavily_search", True)
+        allow_detail = False
+        enable_tavily = self.plugin.get_persona_config_value(ctx.get('persona_name'), "persona_news_conf", "enable_tavily_search", True)
         
         # 随机选择大类和子类
-        rec_type = random.choice(list(self.rec_cats.keys()))
-        sub_style = random.choice(self.rec_cats[rec_type])
+        rec_cats = self._get_rec_cats(ctx.get('persona_name'))
+        if not rec_cats:
+            return None
+        rec_type = random.choice(list(rec_cats.keys()))
+        sub_style = random.choice(rec_cats[rec_type])
         
         target_id = ctx['target_id'] 
         

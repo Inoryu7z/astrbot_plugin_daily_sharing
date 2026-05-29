@@ -66,11 +66,5 @@ class PersonaConfigMixin:
             return self._normalize_persona_name(persona_name)
         return self._normalize_persona_name(item.get("persona_name") or item.get("name") or item.get("select_persona"))
 
-    def _persona_value(self, persona_name: str | None, key: str, default=None):
-        item = self._find_persona_config(persona_name)
-        if item is not None and key in item and item.get(key) is not None:
-            return item.get(key)
-        return self.config.get(key, default)
-
 
 __all__ = ["PersonaConfigMixin"]

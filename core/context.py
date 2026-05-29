@@ -26,17 +26,7 @@ class ContextService:
 
         self._life_plugin = None
         self._memos_plugin = None
-        self._tts_plugin = None
-        
-        unified_conf = self.config.get("context_conf", {})
-        
-        self.life_conf = unified_conf
-        self.history_conf = unified_conf
-        self.memory_conf = unified_conf
-
-        self.image_conf = self.config.get("image_conf", {})
-        self.tts_conf = self.config.get("tts_conf", {}) 
-        self.llm_conf = self.config.get("llm_conf", {}) 
+        self._tts_plugin = None 
 
     # ==================== 基础辅助方法 ====================
 
@@ -173,7 +163,7 @@ class ContextService:
         调用 巴巴啵一 (tts_plus) 插件将文本转换为语音文件路径。
         按 persona_name 匹配巴巴啵一的 select_persona 槽位。
         """
-        if not self.tts_conf.get("enable_tts", False):
+        if not (self.plugin and self.plugin.get_persona_config_value(persona_name, "persona_tts_conf", "enable_tts", False) if persona_name else False):
             return None
 
         tts_plugin = self._get_tts_plugin_inst()
@@ -252,9 +242,6 @@ class ContextService:
     # ==================== 生活上下文 (Life Scheduler) ====================
     
     async def get_life_context(self, persona_name: str = None) -> Optional[str]:
-        if not self.life_conf.get("enable_life_context", True): 
-            return None
-            
         if not self._life_plugin: 
             self._life_plugin = self._find_plugin("life_scheduler")
         
@@ -347,24 +334,8 @@ class ContextService:
             return self._format_life_context_for_private(context, sharing_type)
 
     def _format_life_context_for_group(self, context: str, sharing_type: SharingType, group_info: dict = None, persona_name: str = None) -> str:
-        """格式化群聊生活上下文"""
-        if persona_name:
-            val = self.plugin.get_persona_config_value(persona_name, "persona_context_conf", "life_context_in_group", None)
-            life_in_group = val if val is not None else self.life_conf.get("life_context_in_group", True)
-        else:
-            life_in_group = self.life_conf.get("life_context_in_group", True)
-        if not life_in_group: return ""
-        
-        # 如果是心情分享，且群聊热度高，则不带生活状态
         if sharing_type == SharingType.MOOD and group_info and group_info.get("chat_intensity") == "high":
             return ""
-
-        # 检查配置开关：是否允许分享细节
-        allow_detail = self.life_conf.get("group_share_schedule", False)
-
-        if allow_detail:
-            # 如果允许细节，直接返回完整上下文
-            return f"\n\n【你的当前状态与记忆】\n{context}\n(注意：这是群聊，你可以提及上述状态，但请保持自然，不要像汇报工作一样)\n"
 
         # --- 以下为默认隐私模式（脱敏） ---
 
@@ -540,14 +511,7 @@ class ContextService:
         
         return final_msgs
 
-    async def get_history_data(self, target_umo: str, is_group: bool = None) -> Dict[str, Any]:
-        """
-        获取聊天历史记录
-        """
-        # 1. 基础开关检查
-        if not self.history_conf.get("enable_chat_history", True):
-            return {}
-            
+    async def get_history_data(self, target_umo: str, is_group: bool = None, persona_name: str = None) -> Dict[str, Any]:
         if is_group is None:
             is_group = self._is_group_chat(target_umo)
         adapter_id, real_id = self._parse_umo(target_umo)
@@ -557,17 +521,15 @@ class ContextService:
         bot = self._get_bot_instance(adapter_id)
         if not bot: return {}
         
-        enable_deep = self.history_conf.get("enable_deep_history", True)
-        history_hours = int(self.history_conf.get("deep_history_hours", 24))
+        history_hours = int(self.plugin.get_persona_config_value(persona_name, "persona_context_conf", "deep_history_hours", 24) if persona_name else 24)
         if history_hours > 168:
             history_hours = 168
         
         if is_group:
             # 群聊使用 deep_history_max_count (默认80)
-            max_count = int(self.history_conf.get("deep_history_max_count", 80))
+            max_count = int(self.plugin.get_persona_config_value(persona_name, "persona_context_conf", "deep_history_max_count", 80) if persona_name else 80)
         else:
-            # 私聊使用 private_history_count (默认20)
-            max_count = int(self.history_conf.get("private_history_count", 20))
+            max_count = int(self.plugin.get_persona_config_value(persona_name, "persona_context_conf", "private_history_count", 20) if persona_name else 20)
             
         try:
             logger.info(f"[DailySharing] 正在获取 {real_id} 的聊天历史记录 (模式: {'群聊' if is_group else '私聊'}, 目标: {max_count}条)...")
@@ -575,25 +537,14 @@ class ContextService:
             raw_msgs = []
 
             try:
-                if enable_deep:
-                    raw_msgs = await self._fetch_deep_history(
-                        bot, 
-                        int(real_id), 
-                        is_group=is_group,
-                        hours=history_hours, 
-                        max_count=max_count
-                    )
-                    logger.info(f"[DailySharing] 聊天历史记录获取成功: {len(raw_msgs)} 条")
-                else:
-                    action = "get_group_msg_history" if is_group else "get_friend_msg_history"
-                    key = "group_id" if is_group else "user_id"
-
-                    req_count = max_count 
-                    
-                    payloads = {key: int(real_id), "count": req_count}
-                    
-                    result = await bot.api.call_action(action, **payloads)
-                    raw_msgs = result.get("messages", []) if isinstance(result, dict) else (result or [])
+                raw_msgs = await self._fetch_deep_history(
+                    bot, 
+                    int(real_id), 
+                    is_group=is_group,
+                    hours=history_hours, 
+                    max_count=max_count
+                )
+                logger.info(f"[DailySharing] 聊天历史记录获取成功: {len(raw_msgs)} 条")
 
             except Exception as e:
                 logger.warning(f"[DailySharing] 获取聊天历史记录失败: {e}")
@@ -631,7 +582,7 @@ class ContextService:
 
             result = {"messages": messages, "is_group": is_group}
             if is_group:
-                result["group_info"] = self._analyze_group_chat(messages)
+                result["group_info"] = self._analyze_group_chat(messages, persona_name=persona_name)
             
             return result
 
@@ -639,12 +590,11 @@ class ContextService:
             logger.warning(f"[DailySharing] API 获取历史出错: {e}")
             return {}
 
-    def _analyze_group_chat(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
+    def _analyze_group_chat(self, messages: List[Dict[str, str]], persona_name: str = None) -> Dict[str, Any]:
         """分析群聊热度"""
         if not messages: return {}
         try:
-            # 1. 读取配置的“判断基准数” (例如 30)
-            check_count = int(self.history_conf.get("group_intensity_check_count", 30))
+            check_count = int(self.plugin.get_persona_config_value(persona_name, "persona_context_conf", "group_intensity_check_count", 30) if persona_name else 30)
             
             # 2. 设定“有效时间窗口” (例如最近 20 分钟)
             active_window_seconds = 20 * 60 
@@ -764,9 +714,9 @@ class ContextService:
 
     # ==================== 策略检查 ====================
 
-    def check_group_strategy(self, group_info: Dict) -> bool:
+    def check_group_strategy(self, group_info: Dict, persona_name: str = None) -> bool:
         if not group_info: return True
-        strategy = self.history_conf.get("group_share_strategy", "cautious")
+        strategy = self.plugin.get_persona_config_value(persona_name, "persona_context_conf", "group_share_strategy", "cautious") if persona_name else "cautious"
         is_discussing = group_info.get("is_discussing", False)
         intensity = group_info.get("chat_intensity", "low")
 
@@ -822,33 +772,6 @@ class ContextService:
 
     # ==================== 记忆记录 ====================
 
-    async def record_to_memos(self, target_umo: str, content: str, image_desc: str = None):
-        if not self.memory_conf.get("record_sharing_to_memory", True): return
-        memos = self._get_memos_plugin()
-        if memos:
-            try:
-                # 清洗内容中的标签
-                clean_content = re.sub(r'\$\$(?:EMO:)?(?:happy|sad|angry|neutral|surprise)\$\$', '', content, flags=re.IGNORECASE).strip()
-                full_text = clean_content
-
-                if image_desc: 
-                    tag = f"[配图: {image_desc}]" if self.image_conf.get("record_image_description", True) else "[已发送配图]"
-                    full_text += f"\n{tag}"
-                elif image_desc is not None:
-                    full_text += "\n[已发送配图]"
-
-                cid = await self.context.conversation_manager.get_curr_conversation_id(target_umo)
-                if not cid: cid = await self.context.conversation_manager.new_conversation(target_umo)
-
-                virtual_prompt = "请发送今天的每日分享内容。" 
-                await memos.memory_manager.add_message(
-                    messages=[
-                        {"role": "user", "content": virtual_prompt}, 
-                        {"role": "assistant", "content": full_text}
-                    ],
-                    user_id=target_umo, conversation_id=cid
-                )
-                logger.info(f"[上下文] 已记录到 Memos: {target_umo}")
-            except Exception as e: 
-                logger.warning(f"[上下文] 记录失败: {e}")
+    async def record_to_memos(self, target_umo: str, content: str, image_desc: str = None, persona_name: str = None):
+        pass
                 

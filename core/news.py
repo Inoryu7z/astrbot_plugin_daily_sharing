@@ -8,7 +8,7 @@ from ..config import NEWS_SOURCE_MAP, NEWS_TIME_PREFERENCES, TimePeriod
 class NewsService:
     def __init__(self, config: dict, plugin=None):
         self.config = config
-        self.conf = self.config.get("news_conf", {})
+        self.nycnm_api_key = self.config.get("nycnm_api_key", "").strip()
         self.plugin = plugin
         self._session: aiohttp.ClientSession | None = None
 
@@ -22,6 +22,16 @@ class NewsService:
             await self._session.close()
             self._session = None
 
+    def _get_news_conf(self, persona_name: str, key: str, default=None):
+        if persona_name and self.plugin:
+            try:
+                val = self.plugin.get_persona_config_value(persona_name, "persona_news_conf", key, None)
+                if val is not None:
+                    return val
+            except Exception:
+                pass
+        return default
+
     def _get_current_period(self) -> TimePeriod:
         from datetime import datetime
         hour = datetime.now().hour
@@ -34,25 +44,10 @@ class NewsService:
         else: return TimePeriod.LATE_NIGHT
 
     def select_news_source(self, excluded_source: str = None, persona_name: str = None) -> str:
-        mode = self.conf.get("news_random_mode", "config")
-
-        if persona_name and self.plugin:
-            try:
-                persona_mode = self.plugin.get_persona_config_value(persona_name, "persona_news_conf", "news_random_mode", None)
-                if persona_mode:
-                    mode = persona_mode
-            except Exception:
-                pass
+        mode = self._get_news_conf(persona_name, "news_random_mode", "config")
         
         if mode == "fixed": 
-            source = self.conf.get("news_api_source", "zhihu")
-            if persona_name and self.plugin:
-                try:
-                    persona_source = self.plugin.get_persona_config_value(persona_name, "persona_news_conf", "news_api_source", None)
-                    if persona_source:
-                        source = persona_source
-                except Exception:
-                    pass
+            source = self._get_news_conf(persona_name, "news_api_source", "zhihu")
             logger.debug(f"[新闻] 固定模式: {source}")
             return source
         elif mode == "random": 
@@ -63,14 +58,7 @@ class NewsService:
             logger.info(f"[新闻] 完全随机: {NEWS_SOURCE_MAP[source]['name']}")
             return source
         elif mode == "config":
-            c = self.conf.get("news_random_sources", ["zhihu", "weibo"])
-            if persona_name and self.plugin:
-                try:
-                    persona_sources = self.plugin.get_persona_config_value(persona_name, "persona_news_conf", "news_random_sources", None)
-                    if persona_sources:
-                        c = persona_sources
-                except Exception:
-                    pass
+            c = self._get_news_conf(persona_name, "news_random_sources", ["zhihu", "weibo"])
             valid = [s for s in c if s in NEWS_SOURCE_MAP]
             if not valid: valid = ["zhihu"] 
             
@@ -81,24 +69,21 @@ class NewsService:
             logger.info(f"[新闻] 配置列表随机: {NEWS_SOURCE_MAP[source]['name']}")
             return source
         elif mode == "time_based": 
-            return self._select_by_time(excluded_source)
+            return self._select_by_time(excluded_source, persona_name)
         
         return "zhihu"
 
-    def _select_by_time(self, excluded_source: str = None) -> str:
+    def _select_by_time(self, excluded_source: str = None, persona_name: str = None) -> str:
         """基于时间的智能选择"""
         period = self._get_current_period()
-        # 获取偏好，默认为早晨配置
         prefs = NEWS_TIME_PREFERENCES.get(period, NEWS_TIME_PREFERENCES[TimePeriod.MORNING]).copy()
         
-        # 去重
         if excluded_source and excluded_source in prefs:
-            # 如果存在多个选项，才进行排除。如果只配置了一个选项，则无法排除。
             if len(prefs) > 1:
                 del prefs[excluded_source]
                 logger.debug(f"[新闻] 已排除上次使用的源: {excluded_source}")
         
-        conf = self.conf.get("news_random_sources", None)
+        conf = self._get_news_conf(persona_name, "news_random_sources", None)
         
         selected = "zhihu"
         if conf:
@@ -137,12 +122,11 @@ class NewsService:
         logger.info(f"[新闻] {period_label}智能选择: {NEWS_SOURCE_MAP[selected]['name']}")
         return selected
 
-    async def get_hot_news(self, specific_source: str = None) -> Optional[tuple]:
+    async def get_hot_news(self, specific_source: str = None, persona_name: str = None) -> Optional[tuple]:
         """获取热搜 (包含降级重试逻辑)"""
-        # 检查开关和Key
-        if not self.conf.get("enable_news_api", True): return None
+        if not self._get_news_conf(persona_name, "enable_news_api", True): return None
 
-        key = self.conf.get("nycnm_api_key", "").strip()
+        key = self.nycnm_api_key
         if not key: 
             logger.error("[新闻] 未配置柠柚API密钥！")
             return None
@@ -151,19 +135,19 @@ class NewsService:
         if specific_source and specific_source in NEWS_SOURCE_MAP:
              pri_source = specific_source
         else:
-             pri_source = self.select_news_source()
+             pri_source = self.select_news_source(persona_name=persona_name)
 
-        res = await self._fetch_news(pri_source, key)
+        res = await self._fetch_news(pri_source, key, persona_name)
         if res: 
             return (res, pri_source)
 
         logger.warning(f"[新闻] 主要源 {pri_source} 失败，尝试备用源...")
         
-        mode = self.conf.get("news_random_mode", "config")
+        mode = self._get_news_conf(persona_name, "news_random_mode", "config")
         
         # 确定备选池范围
         if mode in ["config", "time_based"]:
-            configured = self.conf.get("news_random_sources", ["zhihu", "weibo"])
+            configured = self._get_news_conf(persona_name, "news_random_sources", ["zhihu", "weibo"])
             pool = [s for s in configured if s in NEWS_SOURCE_MAP]
         else:
             # 从所有可用源中找
@@ -179,7 +163,7 @@ class NewsService:
         back_source = random.choice(fallback_pool)
         logger.info(f"[新闻] 尝试备用源: {NEWS_SOURCE_MAP[back_source]['name']}")
         
-        res = await self._fetch_news(back_source, key)
+        res = await self._fetch_news(back_source, key, persona_name)
         if res:
             logger.info(f"[新闻] 备用源成功")
             return (res, back_source)
@@ -187,21 +171,21 @@ class NewsService:
         logger.warning(f"[新闻] 所有新闻源均失败")
         return None
 
-    def get_hot_news_image_url(self, source: str = None) -> tuple:
+    def get_hot_news_image_url(self, source: str = None, persona_name: str = None) -> tuple:
         """获取热搜图片URL"""
         if not source or source not in NEWS_SOURCE_MAP:
-            source = self.select_news_source()
+            source = self.select_news_source(persona_name=persona_name)
         
         base_url = NEWS_SOURCE_MAP[source]['url']
         extra_params = NEWS_SOURCE_MAP[source].get('extra_params', '')
-        key = self.conf.get("nycnm_api_key", "").strip()
+        key = self.nycnm_api_key
         
         final_url = f"{base_url}?format=image{extra_params}"
         if key:
             final_url += f"&apikey={key}"
             
         return final_url, NEWS_SOURCE_MAP[source]['name']
-    async def _fetch_news(self, source: str, key: str) -> Optional[List[Dict]]:
+    async def _fetch_news(self, source: str, key: str, persona_name: str = None) -> Optional[List[Dict]]:
         """执行 HTTP 请求 """
         if source not in NEWS_SOURCE_MAP: return None
         
@@ -210,7 +194,7 @@ class NewsService:
         extra_params = NEWS_SOURCE_MAP[source].get('extra_params', '')
         full_url = f"{url}?format=json&apikey={key}{extra_params}"
         
-        timeout = self.conf.get("news_api_timeout", 30)
+        timeout = self._get_news_conf(persona_name, "news_api_timeout", 30)
         
         logger.info(f"[新闻] 获取新闻: {source_name}")
         logger.debug(f"[新闻] 请求URL: {url}?format=json&apikey=***{extra_params}")
@@ -225,7 +209,7 @@ class NewsService:
                     return None
                     
                     data = await resp.json(content_type=None)
-                    parsed = self._parse_response(data)
+                    parsed = self._parse_response(data, persona_name)
                     
                     if parsed:
                         logger.info(f"[新闻] 成功获取 {len(parsed)} 条{source_name}")
@@ -245,7 +229,7 @@ class NewsService:
             logger.error(f"[新闻] 解析新闻失败: {e}", exc_info=True)
             return None
 
-    def _parse_response(self, data: Any) -> Optional[List[Dict]]:
+    def _parse_response(self, data: Any, persona_name: str = None) -> Optional[List[Dict]]:
         """
         解析响应数据
         支持多层级 JSON 和多种字段名 (hot/heat/hotValue/hot_value)
@@ -291,7 +275,7 @@ class NewsService:
         
         if not items: return None
 
-        limit = self.conf.get("news_items_count", 5)
+        limit = self._get_news_conf(persona_name, "news_items_count", 5)
 
         # 3. 提取字段 (title, hot, url)
         res = []
@@ -328,10 +312,10 @@ class NewsService:
             
         return res if res else None
 
-    async def get_baike_info(self, keyword: str) -> Optional[str]:
+    async def get_baike_info(self, keyword: str, persona_name: str = None) -> Optional[str]:
         """获取百科词条简介 (柠柚API)"""
-        if not self.conf.get("enable_news_api", True): return None
-        key = self.conf.get("nycnm_api_key", "").strip()
+        if not self._get_news_conf(persona_name, "enable_news_api", True): return None
+        key = self.nycnm_api_key
         if not key: return None
 
         # 清理关键词 
@@ -384,9 +368,9 @@ class NewsService:
             logger.warning(f"[百科] 查询失败: {e}")
             return None
 
-    async def get_ai_news_json(self) -> Optional[Dict]:
+    async def get_ai_news_json(self, persona_name: str = None) -> Optional[Dict]:
         """获取每日AI资讯JSON数据"""
-        key = self.conf.get("nycnm_api_key", "").strip()
+        key = self.nycnm_api_key
         if not key:
             logger.error("[新闻] 未配置柠柚API密钥")
             return None
@@ -410,17 +394,17 @@ class NewsService:
         except Exception as e:
             return None           
 
-    def get_60s_image_url(self) -> Optional[str]:
+    def get_60s_image_url(self, persona_name: str = None) -> Optional[str]:
         """获取每日60s读世界图片URL"""
-        key = self.conf.get("nycnm_api_key", "").strip()
+        key = self.nycnm_api_key
         if not key:
             logger.error("[新闻] 未配置柠柚API密钥")
             return None
         return f"https://api.nycnm.cn/API/60s.php?format=image&apikey={key}"
 
-    def get_ai_news_image_url(self) -> Optional[str]:
+    def get_ai_news_image_url(self, persona_name: str = None) -> Optional[str]:
         """获取每日AI资讯图片URL"""
-        key = self.conf.get("nycnm_api_key", "").strip()
+        key = self.nycnm_api_key
         if not key:
             logger.error("[新闻] 未配置柠柚API密钥")
             return None

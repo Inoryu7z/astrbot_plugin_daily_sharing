@@ -29,16 +29,6 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
         self.config = config 
         self.scheduler = AsyncIOScheduler()
         
-        # 配置引用
-        self.basic_conf = self.config.get("basic_conf", {})
-        self.image_conf = self.config.get("image_conf", {})
-        self.tts_conf = self.config.get("tts_conf", {})
-        self.llm_conf = self.config.get("llm_conf", {})
-        self.qzone_conf = self.config.get('qzone_conf', {})
-        self.receiver_conf = self.config.get("receiver", {})
-        self.extra_shares_conf = self.config.get("extra_shares", {})
-        self.context_conf = self.config.get("context_conf", {})
-        
         # 分享内容记录条数 
         self.history_limit = 100
         
@@ -99,37 +89,16 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
 
     def get_enabled_personas(self) -> list:
         entries = self._persona_entries()
-        return [e for e in entries if e.get("enabled", True)]
+        return entries
 
-    _CONF_KEY_TO_GLOBAL = {
-        "persona_basic_conf": "basic_conf",
-        "persona_qzone_conf": "qzone_conf",
-        "persona_image_conf": "image_conf",
-        "persona_tts_conf": "tts_conf",
-        "persona_context_conf": "context_conf",
-        "persona_news_conf": "news_conf",
-        "persona_llm_conf": "llm_conf",
-    }
-
-    def get_persona_config_value(self, persona_name: str, conf_key: str, sub_key: str, default=None, int_fallback_sentinel=None):
+    def get_persona_config_value(self, persona_name: str, conf_key: str, sub_key: str, default=None):
         item = self._find_persona_config(persona_name)
         if item is not None:
             persona_conf = item.get(conf_key, {})
             if isinstance(persona_conf, dict) and sub_key in persona_conf:
                 val = persona_conf[sub_key]
-                is_unset = (val is None or val == "" or val == [])
-                if int_fallback_sentinel is not None and isinstance(val, int) and val == int_fallback_sentinel:
-                    is_unset = True
-                elif val == -1:
-                    is_unset = True
-                if not is_unset:
-                    if isinstance(val, str) and val.lower() in ("true", "false"):
-                        return val.lower() == "true"
+                if val is not None and val != "" and val != []:
                     return val
-        global_key = self._CONF_KEY_TO_GLOBAL.get(conf_key, conf_key)
-        global_conf = self.config.get(global_key, {})
-        if isinstance(global_conf, dict):
-            return global_conf.get(sub_key, default)
         return default
 
     def get_persona_receiver(self, persona_name: str) -> dict:
@@ -137,11 +106,8 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
         if item is not None:
             pr = item.get("persona_receiver", {})
             if isinstance(pr, dict):
-                if pr.get("disable_chat_sharing"):
-                    return {"groups": [], "users": []}
-                if pr.get("groups") or pr.get("users") or pr.get("adapter_id"):
-                    return pr
-        return self.receiver_conf
+                return pr
+        return {"groups": [], "users": [], "adapter_id": ""}
 
     async def resolve_persona_from_event(self, event) -> str:
         try:
@@ -228,15 +194,20 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
 
         # 启动时清理一次过期数据
         try:
-            days_limit = self.content_service.dedup_days
+            days_limit = int(self.config.get("data_retention_days", 60))
             await self.db.clean_expired_data(days_limit)
         except Exception:
             pass
 
         has_targets = False
-        if self.receiver_conf:
-            if self.receiver_conf.get("groups") or self.receiver_conf.get("users"):
-                has_targets = True
+        for entry in self.get_enabled_personas():
+            pname = entry.get("persona_name") or entry.get("name") or entry.get("select_persona", "")
+            if pname:
+                canonical = self._canonical_persona_name(pname) or pname
+                receiver = self.get_persona_receiver(canonical)
+                if receiver.get("groups") or receiver.get("users"):
+                    has_targets = True
+                    break
         
         if not has_targets:
             logger.warning("[DailySharing] 未配置接收对象 (receiver)")
@@ -294,14 +265,13 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
 
         if provider_id:
             user_provider_id = provider_id
-            config_timeout = self.llm_conf.get("llm_timeout", 60)
+            config_timeout = 120
         elif persona_name:
             user_provider_id = self.get_persona_config_value(persona_name, "persona_llm_conf", "llm_provider_id", "")
-            persona_timeout = self.get_persona_config_value(persona_name, "persona_llm_conf", "llm_timeout", None, int_fallback_sentinel=0)
-            config_timeout = persona_timeout if persona_timeout is not None else self.llm_conf.get("llm_timeout", 60)
+            config_timeout = 120
         else:
-            user_provider_id = self.llm_conf.get("llm_provider_id", "")
-            config_timeout = self.llm_conf.get("llm_timeout", 60)
+            user_provider_id = ""
+            config_timeout = 120
 
         current_provider_id = user_provider_id if user_provider_id else _get_system_default_provider()
 
@@ -431,7 +401,9 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
 
         # 指令触发时缓存 Adapter ID (若未强制指定)
         try:
-            configured_id = self.receiver_conf.get("adapter_id", "").strip()
+            persona_name = await self.resolve_persona_from_event(event)
+            receiver = self.get_persona_receiver(persona_name) if persona_name else {}
+            configured_id = receiver.get("adapter_id", "").strip()
             if not configured_id and event.unified_msg_origin:
                 adapter_id = event.unified_msg_origin.split(":")[0]
                 if adapter_id:
@@ -454,7 +426,7 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
 
         # =============== 手动触发 60s 新闻 ===============
         if arg == "60s":
-            url = self.news_service.get_60s_image_url()
+            url = self.news_service.get_60s_image_url(persona_name=persona_name)
             if not url:
                 yield event.plain_result("获取60s新闻失败，请检查API Key配置。")
                 return
@@ -484,12 +456,12 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
         # =============== 手动触发AI资讯 ===============
         if arg == "ai":
             # 先拦截检测
-            ai_data = await self.news_service.get_ai_news_json()
+            ai_data = await self.news_service.get_ai_news_json(persona_name=persona_name)
             if not ai_data:
                 yield event.plain_result("获取AI资讯失败或今日暂无更新。")
                 return
 
-            url = self.news_service.get_ai_news_image_url()
+            url = self.news_service.get_ai_news_image_url(persona_name=persona_name)
             if not url:
                 yield event.plain_result("获取AI资讯图片失败，请检查API Key配置。")
                 return
@@ -580,8 +552,8 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
                         break
                         
                 if is_image_mode:
-                    if not news_src: news_src = self.news_service.select_news_source()
-                    img_url, src_name = self.news_service.get_hot_news_image_url(news_src)
+                    if not news_src: news_src = self.news_service.select_news_source(persona_name=persona_name)
+                    img_url, src_name = self.news_service.get_hot_news_image_url(news_src, persona_name=persona_name)
                     
                     if is_qzone_target:
                         yield event.plain_result(f"正在获取[{src_name}]图片并分享到QQ空间...")
