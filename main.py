@@ -27,6 +27,7 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
         self.config = config 
+        self.receiver_conf = self.config.get("receiver", {})
         self.scheduler = AsyncIOScheduler()
         
         # 分享内容记录条数 
@@ -105,9 +106,9 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
         item = self._find_persona_config(persona_name)
         if item is not None:
             pr = item.get("persona_receiver", {})
-            if isinstance(pr, dict):
+            if isinstance(pr, dict) and (pr.get("groups") or pr.get("users") or pr.get("adapter_id")):
                 return pr
-        return {"groups": [], "users": [], "adapter_id": ""}
+        return self.receiver_conf if self.receiver_conf else {"groups": [], "users": [], "adapter_id": ""}
 
     async def resolve_persona_from_event(self, event) -> str:
         try:
@@ -217,8 +218,7 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
         
         # 启动调度器 
         if not self._is_terminated and not self.scheduler.running:
-            if self.scheduler.get_jobs():
-                self.scheduler.start()
+            self.scheduler.start()
 
     async def _delayed_init_bots(self):
         """延迟初始化 Bot 缓存"""
@@ -447,7 +447,7 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
 
             target_desc = "配置的所有群聊和私聊" if is_broadcast else "当前会话"
             yield event.plain_result(f"正在向{target_desc}分享60s新闻...")
-            targets = [specific_target] if specific_target else self.task_manager.get_broadcast_targets()
+            targets = [specific_target] if specific_target else self.task_manager.get_broadcast_targets(persona_name=persona_name)
             for target in targets:
                 await self.context.send_message(target, MessageChain().url_image(url))
                 await asyncio.sleep(1)
@@ -482,7 +482,7 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
 
             target_desc = "配置的所有群聊和私聊" if is_broadcast else "当前会话"
             yield event.plain_result(f"正在向{target_desc}分享AI资讯...")
-            targets = [specific_target] if specific_target else self.task_manager.get_broadcast_targets()
+            targets = [specific_target] if specific_target else self.task_manager.get_broadcast_targets(persona_name=persona_name)
             for target in targets:
                 await self.context.send_message(target, MessageChain().url_image(url))
                 await asyncio.sleep(1)

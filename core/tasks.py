@@ -95,13 +95,13 @@ class TaskManager:
         r_groups = self._parse_targets_config(receiver_conf.get("groups", []))
         r_users = self._parse_targets_config(receiver_conf.get("users", []))
 
-        prefix = f"persona_{persona_name}_"
-        job_ids = [job.id for job in self.scheduler.get_jobs() if job.id.startswith(prefix)]
+        custom_prefix = f"persona_{persona_name}_custom_share_"
+        job_ids = [job.id for job in self.scheduler.get_jobs() if job.id.startswith(custom_prefix)]
         for jid in job_ids:
             self.scheduler.remove_job(jid)
 
         def add_custom_job(target_id, is_group, cron_str):
-            job_id = f"{prefix}custom_share_{target_id}"
+            job_id = f"{custom_prefix}{target_id}"
             target_umo = f"{default_adapter_id}:{'GroupMessage' if is_group else 'FriendMessage'}:{target_id}"
 
             async def delayed_custom_execute():
@@ -357,6 +357,37 @@ class TaskManager:
                         run_date=run_time, id=job_id, replace_existing=True
                     )
                     logger.debug(f"[DailySharing] 人格 [{persona_name}] 今日随机任务 [{period_str}] 已安排在: {run_time.strftime('%H:%M:%S')} 执行")
+                else:
+                    try:
+                        start_str, end_str = period_str.split('-')
+                        end_h, end_m = map(int, end_str.split(':'))
+                        end_dt = now.replace(hour=end_h, minute=end_m, second=59, microsecond=0)
+                        grace_dt = end_dt + timedelta(minutes=30)
+                        if now <= grace_dt:
+                            delay = random.randint(10, 120)
+                            compensated_time = now + timedelta(seconds=delay)
+                            job_id = f"{prefix}{idx}"
+                            self.scheduler.add_job(
+                                self._make_task_wrapper(persona_name), 'date',
+                                run_date=compensated_time, id=job_id, replace_existing=True
+                            )
+                            jobs[period_str] = compensated_time.timestamp()
+                            random_schedule["jobs"] = jobs
+                            await self.db.update_state_dict(state_key, {"random_schedule": random_schedule})
+                            logger.info(f"[DailySharing] 人格 [{persona_name}] 随机时间已过但仍在时段内，补偿安排在: {compensated_time.strftime('%H:%M:%S')} 执行")
+                        else:
+                            logger.info(f"[DailySharing] 人格 [{persona_name}] 时段 [{period_str}] 的随机时间已过且超出宽限期，跳过今日分享")
+                    except Exception as e:
+                        logger.warning(f"[DailySharing] 补偿调度失败 [{period_str}]: {e}")
+
+            nearest_future_ts = None
+            for period_str, ts in jobs.items():
+                rt = datetime.fromtimestamp(ts)
+                if rt > now:
+                    if nearest_future_ts is None or ts < nearest_future_ts:
+                        nearest_future_ts = ts
+            if nearest_future_ts is not None:
+                await self.db.update_state_dict(state_key, {"pending_delay_job": {"target_time": nearest_future_ts}})
         return scheduler
 
     def _make_persona_qzone_random_scheduler(self, persona_name: str):
@@ -415,6 +446,37 @@ class TaskManager:
                         run_date=run_time, id=job_id, replace_existing=True
                     )
                     logger.debug(f"[DailySharing] 人格 [{persona_name}] 今日QQ空间随机任务 [{period_str}] 已安排在: {run_time.strftime('%H:%M:%S')} 执行")
+                else:
+                    try:
+                        start_str, end_str = period_str.split('-')
+                        end_h, end_m = map(int, end_str.split(':'))
+                        end_dt = now.replace(hour=end_h, minute=end_m, second=59, microsecond=0)
+                        grace_dt = end_dt + timedelta(minutes=30)
+                        if now <= grace_dt:
+                            delay = random.randint(10, 120)
+                            compensated_time = now + timedelta(seconds=delay)
+                            job_id = f"{prefix}{idx}"
+                            self.scheduler.add_job(
+                                self._make_qzone_task_wrapper(persona_name), 'date',
+                                run_date=compensated_time, id=job_id, replace_existing=True
+                            )
+                            jobs[period_str] = compensated_time.timestamp()
+                            qzone_random_schedule["jobs"] = jobs
+                            await self.db.update_state_dict(state_key, {"random_schedule": qzone_random_schedule})
+                            logger.info(f"[DailySharing] 人格 [{persona_name}] QQ空间随机时间已过但仍在时段内，补偿安排在: {compensated_time.strftime('%H:%M:%S')} 执行")
+                        else:
+                            logger.info(f"[DailySharing] 人格 [{persona_name}] QQ空间时段 [{period_str}] 的随机时间已过且超出宽限期，跳过今日分享")
+                    except Exception as e:
+                        logger.warning(f"[DailySharing] QQ空间补偿调度失败 [{period_str}]: {e}")
+
+            nearest_future_ts = None
+            for period_str, ts in jobs.items():
+                rt = datetime.fromtimestamp(ts)
+                if rt > now:
+                    if nearest_future_ts is None or ts < nearest_future_ts:
+                        nearest_future_ts = ts
+            if nearest_future_ts is not None:
+                await self.db.update_state_dict(state_key, {"pending_delay_job": {"target_time": nearest_future_ts}})
         return scheduler
 
 
