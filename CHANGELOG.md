@@ -1,3 +1,12 @@
+### v5.7.2
+
+**修复日程数据获取失败 + 修复历史记录写入报错**
+
+*   修复插件引用缓存导致日程数据获取失败：dayflow 插件热重载后，dailysharing 仍持有旧实例引用，旧实例的 store 数据可能已被清理或不再更新，导致 get_life_context() 返回空数据或错误数据。现改为每次调用时重新查找插件实例，不再缓存引用（影响 context.py 和 content.py 中的 dayflow/daymind 插件查找）
+*   修复 record_bot_reply_to_history() 调用时传入了不存在的 persona_name 关键字参数导致 TypeError（早期遗留问题）
+
+---
+
 ### v5.7.1
 
 **🐛 修复副人格无法分享 + 配置架构优化**

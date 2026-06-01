@@ -1078,7 +1078,7 @@ class TaskManager:
             
             # 记录上下文
             img_desc = self.image_service.get_last_description()
-            await self.ctx_service.record_bot_reply_to_history(target_umo, content, image_desc=img_desc, persona_name=persona_name)
+            await self.ctx_service.record_bot_reply_to_history(target_umo, content, image_desc=img_desc)
             await self.ctx_service.record_to_memos(target_umo, content, img_desc, persona_name=persona_name)
                 
         except Exception as e:
@@ -1290,7 +1290,7 @@ class TaskManager:
                 
                 # 获取图片描述并写入 AstrBot 聊天上下文
                 img_desc = self.image_service.get_last_description()
-                await self.ctx_service.record_bot_reply_to_history(uid, content, image_desc=img_desc, persona_name=persona_name)
+                await self.ctx_service.record_bot_reply_to_history(uid, content, image_desc=img_desc)
 
                 # 记录与历史
                 await self.ctx_service.record_to_memos(uid, content, img_desc, persona_name=persona_name)

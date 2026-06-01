@@ -26,10 +26,6 @@ class ContentService:
         self.data_retention_days = int(self.config.get("data_retention_days", 60))
         self._rec_cats_cache = {}
         
-        self._daymind_plugin = None
-        self._daymind_not_found = False
-        self._dayflow_plugin = None
-        self._dayflow_not_found = False
         self._session: aiohttp.ClientSession | None = None
 
     async def _get_session(self) -> aiohttp.ClientSession:
@@ -672,10 +668,6 @@ class ContentService:
     # ==================== DayMind / DayFlow 集成 ====================
 
     def _find_daymind_plugin(self):
-        if self._daymind_not_found:
-            return None
-        if self._daymind_plugin:
-            return self._daymind_plugin
         try:
             for p in self.context.get_all_stars():
                 p_name = getattr(p, "name", "")
@@ -683,20 +675,12 @@ class ContentService:
                     for attr in ("star_instance", "instance", "star_cls"):
                         candidate = getattr(p, attr, None)
                         if candidate and hasattr(candidate, "scheduler"):
-                            self._daymind_plugin = candidate
-                            logger.info("[内容服务] 已找到 DayMind 插件")
                             return candidate
-            self._daymind_not_found = True
         except Exception as e:
             logger.debug(f"[内容服务] 查找 DayMind 插件失败: {e}")
-            self._daymind_not_found = True
         return None
 
     def _find_dayflow_plugin(self):
-        if self._dayflow_not_found:
-            return None
-        if self._dayflow_plugin:
-            return self._dayflow_plugin
         try:
             for p in self.context.get_all_stars():
                 p_name = getattr(p, "name", "")
@@ -704,13 +688,9 @@ class ContentService:
                     for attr in ("star_instance", "instance", "star_cls"):
                         candidate = getattr(p, attr, None)
                         if candidate and hasattr(candidate, "get_life_context"):
-                            self._dayflow_plugin = candidate
-                            logger.info("[内容服务] 已找到 DayFlow 插件")
                             return candidate
-            self._dayflow_not_found = True
         except Exception as e:
             logger.debug(f"[内容服务] 查找 DayFlow 插件失败: {e}")
-            self._dayflow_not_found = True
         return None
 
     async def _get_daymind_mood(self, persona_name: str = None) -> dict:

@@ -22,11 +22,7 @@ class ContextService:
         self.context = context_obj
         self.config = config
         self.plugin = plugin
-        self.bot_map = {} 
-
-        self._life_plugin = None
-        self._memos_plugin = None
-        self._tts_plugin = None 
+        self.bot_map = {}
 
     # ==================== 基础辅助方法 ====================
 
@@ -51,16 +47,10 @@ class ContextService:
         return None
 
     def _get_memos_plugin(self):
-        """获取 Memos 插件"""
-        if not self._memos_plugin:
-            self._memos_plugin = self._find_plugin("memos")
-        return self._memos_plugin
+        return self._find_plugin("memos")
 
     def _get_tts_plugin_inst(self):
-        """获取 TTS+ 插件实例 (巴巴啵一)"""
-        if not self._tts_plugin:
-            self._tts_plugin = self._find_plugin("tts_plus")
-        return self._tts_plugin
+        return self._find_plugin("tts_plus")
 
     def _is_group_chat(self, target_umo: str) -> bool:
         """判断是否为群聊"""
@@ -241,23 +231,32 @@ class ContextService:
     
     # ==================== 生活上下文 (Life Scheduler) ====================
     
+    def _find_life_plugin(self):
+        try:
+            for p in self.context.get_all_stars():
+                p_name = getattr(p, "name", "") or ""
+                if "dayflow" in p_name or "life_scheduler" in p_name:
+                    for attr in ("star_instance", "instance", "star_cls"):
+                        candidate = getattr(p, attr, None)
+                        if candidate and hasattr(candidate, "get_life_context"):
+                            return candidate
+        except Exception as e:
+            logger.debug(f"[上下文] 查找 Life Scheduler 插件失败: {e}")
+        return None
+
     async def get_life_context(self, persona_name: str = None) -> Optional[str]:
-        if not self._life_plugin: 
-            self._life_plugin = self._find_plugin("life_scheduler")
-        
-        plugin = self._life_plugin
+        plugin = self._find_life_plugin()
         if not plugin:
             return None
 
-        if hasattr(plugin, 'get_life_context'):
-            try: 
-                raw_data = await plugin.get_life_context(persona_name=persona_name)
-                
-                if isinstance(raw_data, dict):
-                    return self._parse_life_data(raw_data)
-                
-            except Exception as e: 
-                logger.warning(f"[上下文] Life Scheduler 方法调用出错: {e}")
+        try: 
+            raw_data = await plugin.get_life_context(persona_name=persona_name)
+            
+            if isinstance(raw_data, dict):
+                return self._parse_life_data(raw_data)
+            
+        except Exception as e: 
+            logger.warning(f"[上下文] Life Scheduler 方法调用出错: {e}")
         
         return None
 
