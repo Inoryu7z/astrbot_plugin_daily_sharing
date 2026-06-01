@@ -75,40 +75,41 @@ class ImageService:
 
         now = datetime.now()
         curr_hour = now.hour
+        curr_time = f"{now.hour:02d}:{now.minute:02d}"
 
         prioritize_text = False
 
         if prioritize_text:
             logic_prompt = f"""
 1. **第一优先级（文案主导）**：首先检查【分享文案】。如果文案中明确提及了地点（例如："我在海边"、"刚到酒店"、"去公园玩"），**必须无条件直接绘制文案描述的地点**，即使它与日程表冲突。
-2. **第二优先级（日程补缺）**：只有当【分享文案】**完全未提及**地点时，才提取日程中 **{curr_hour}:00 正在进行** 的状态来设定背景场景。
+2. **第二优先级（日程补缺）**：只有当【分享文案】**完全未提及**地点时，才提取日程中 **{curr_time} 正在进行** 的状态来设定背景场景。
 """
         else:
             logic_prompt = f"""
-1. **第一优先级（日程主导）**：首先检查【生活日程】。如果 **{curr_hour}:00** 有明确的活动地点（例如："在办公室"、"在健身房"），**必须无条件优先绘制日程地点**。忽略文案中的地点（视为比喻或回忆）。
+1. **第一优先级（日程主导）**：首先检查【生活日程】。如果 **{curr_time}** 有明确的活动地点（例如："在办公室"、"在健身房"），**必须无条件优先绘制日程地点**。忽略文案中的地点（视为比喻或回忆）。
 2. **第二优先级（文案补缺）**：只有当【生活日程】为空或未明确指定地点时，才参考【分享文案】中的地点描述。
 """
 
         custom_prompt = self.config.get("visual_director_prompt", "").strip()
         if custom_prompt:
             try:
-                safe_format = dict(logic_prompt=logic_prompt, curr_hour=curr_hour)
+                safe_format = dict(logic_prompt=logic_prompt, curr_hour=curr_hour, curr_time=curr_time)
                 system_prompt = custom_prompt.replace("{time_hint}", "").replace("{outfit_hint}", "").format(**safe_format)
                 if self.debug_mode:
                     logger.info(f"[DailySharing] 视觉导演使用自定义提示词 (长度: {len(custom_prompt)} 字符)")
             except (KeyError, ValueError) as e:
                 logger.warning(f"[DailySharing] 自定义视觉导演提示词格式化失败: {e}，使用默认模板")
-                system_prompt = self._get_default_visual_director_prompt(logic_prompt, curr_hour)
+                system_prompt = self._get_default_visual_director_prompt(logic_prompt, curr_time)
         else:
             if self.debug_mode:
                 logger.info("[DailySharing] 视觉导演使用默认提示词模板")
-            system_prompt = self._get_default_visual_director_prompt(logic_prompt, curr_hour)
+            system_prompt = self._get_default_visual_director_prompt(logic_prompt, curr_time)
 
         user_prompt = f"【分享文案】：{content}\n【生活日程】：{life_context}\n\n请生成绘画提示词："
 
         if self.debug_mode:
             logger.info("-" * 60)
-            logger.info(f"[DailySharing] 【DEBUG】发送给 Agent 的请求详情 (时间: {curr_hour}:00)")
+            logger.info(f"[DailySharing] 【DEBUG】发送给 Agent 的请求详情 (时间: {curr_time})")
             logger.info(f"[DailySharing] 【DEBUG】System Prompt (前300字): {system_prompt[:300]}...")
             logger.info(f"[DailySharing] 【DEBUG】User Prompt: {user_prompt}")
 
@@ -128,13 +129,13 @@ class ImageService:
             logger.warning(f"[DailySharing] Agent 提取失败: {e}")
             return None
 
-    def _get_default_visual_director_prompt(self, logic_prompt: str, curr_hour: int) -> str:
+    def _get_default_visual_director_prompt(self, logic_prompt: str, curr_time: str) -> str:
         return f"""你是 AI 绘画视觉导演。从用户的【分享文案】和【生活日程】中提取画面信息，生成一段完整的 AI 绘画提示词。
 
-当前时间：{curr_hour}:00。确保场景的光线和活动类型与当前时间吻合。
+当前时间：{curr_time}。确保场景的光线和活动类型与当前时间吻合。
 
 {logic_prompt}
-严禁提取 {curr_hour}:00 之后的日程作为当前场景。
+严禁提取 {curr_time} 之后的日程作为当前场景。
 
 【输出格式】
 输出一段连贯的自然语言段落，直接作为 AI 绘画提示词。禁止输出 JSON、禁止使用分类标签（如"内搭：""外穿：""风格："等元标记）。

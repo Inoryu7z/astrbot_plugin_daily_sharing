@@ -285,7 +285,22 @@ class TaskManager:
             task = asyncio.current_task()
             self.plugin._bg_tasks.add(task)
             try:
-                await self.execute_qzone_share(persona_name=persona_name)
+                qzone_key = f"qzone_{persona_name}"
+                await self.db.update_state_dict(qzone_key, {"pending_delay_job": None})
+                now = datetime.now()
+                debounce_key = f"qzone_{persona_name}"
+                last_time = self.plugin._last_share_time.get(debounce_key)
+                if last_time:
+                    if (now - last_time).total_seconds() < 300:
+                        logger.debug(f"[DailySharing] 检测到近期已执行QQ空间任务[人格: {persona_name}]，跳过本次触发。")
+                        return
+                lock = self._get_lock(persona_name)
+                if lock.locked():
+                    logger.warning(f"[DailySharing] 上一个任务正在进行中[人格: {persona_name}]，跳过QQ空间触发。")
+                    return
+                async with lock:
+                    self.plugin._last_share_time[debounce_key] = now
+                    await self.execute_qzone_share(persona_name=persona_name)
             finally:
                 self.plugin._bg_tasks.discard(task)
         return wrapper
