@@ -273,6 +273,7 @@ class TaskManager:
                     return
                 async with lock:
                     self.plugin._last_share_time[debounce_key] = now
+                    await self._mark_current_period_executed(state_key, now)
                     logger.info(f"[DailySharing] 开始执行分享任务 [人格: {persona_name}]...")
                     await self.execute_share(persona_name=persona_name)
             finally:
@@ -300,10 +301,38 @@ class TaskManager:
                     return
                 async with lock:
                     self.plugin._last_share_time[debounce_key] = now
+                    await self._mark_current_period_executed(qzone_key, now)
                     await self.execute_qzone_share(persona_name=persona_name)
             finally:
                 self.plugin._bg_tasks.discard(task)
         return wrapper
+
+    async def _mark_current_period_executed(self, state_key, now):
+        try:
+            state = await self.db.get_state(state_key, {})
+            rs = state.get("random_schedule", {})
+            jobs = rs.get("jobs", {})
+            if not jobs:
+                return
+            nts = now.timestamp()
+            fp = None
+            bd = None
+            for ps, ts in jobs.items():
+                if ts <= nts:
+                    d = nts - ts
+                    if bd is None or d < bd:
+                        bd = d
+                        fp = ps
+            if not fp:
+                return
+            ex = rs.get("executed_periods", [])
+            if fp not in ex:
+                ex.append(fp)
+                rs["executed_periods"] = ex
+                await self.db.update_state_dict(state_key, {"random_schedule": rs})
+                logger.debug(f"[DailySharing] mark period executed: {fp}")
+        except Exception as e:
+            logger.warning(f"[DailySharing] mark executed fail: {e}")
 
     def _make_persona_daily_random_scheduler(self, persona_name: str):
         async def scheduler():
@@ -323,10 +352,15 @@ class TaskManager:
 
             is_modified = False
             if random_schedule.get("date") != date_str:
-                random_schedule = {"date": date_str, "jobs": {}}
+                random_schedule = {"date": date_str, "jobs": {}, "executed_periods": []}
+                is_modified = True
+
+            if "executed_periods" not in random_schedule:
+                random_schedule["executed_periods"] = []
                 is_modified = True
 
             jobs = random_schedule.get("jobs", {})
+            executed_periods = random_schedule.get("executed_periods", [])
             stale_periods = [p for p in jobs.keys() if p not in periods]
             for p in stale_periods:
                 del jobs[p]
@@ -379,6 +413,9 @@ class TaskManager:
                         end_dt = now.replace(hour=end_h, minute=end_m, second=59, microsecond=0)
                         grace_dt = end_dt + timedelta(minutes=30)
                         if now <= grace_dt:
+                            if period_str in executed_periods:
+                                logger.info(f"[DailySharing] skip compensate: period {period_str} already executed")
+                                continue
                             delay = random.randint(10, 120)
                             compensated_time = now + timedelta(seconds=delay)
                             job_id = f"{prefix}{idx}"
@@ -423,10 +460,15 @@ class TaskManager:
 
             is_modified = False
             if qzone_random_schedule.get("date") != date_str:
-                qzone_random_schedule = {"date": date_str, "jobs": {}}
+                qzone_random_schedule = {"date": date_str, "jobs": {}, "executed_periods": []}
+                is_modified = True
+
+            if "executed_periods" not in qzone_random_schedule:
+                qzone_random_schedule["executed_periods"] = []
                 is_modified = True
 
             jobs = qzone_random_schedule.get("jobs", {})
+            executed_periods = qzone_random_schedule.get("executed_periods", [])
             stale_periods = [p for p in jobs.keys() if p not in periods]
             for p in stale_periods:
                 del jobs[p]
@@ -468,6 +510,9 @@ class TaskManager:
                         end_dt = now.replace(hour=end_h, minute=end_m, second=59, microsecond=0)
                         grace_dt = end_dt + timedelta(minutes=30)
                         if now <= grace_dt:
+                            if period_str in executed_periods:
+                                logger.info(f"[DailySharing] skip compensate: period {period_str} already executed")
+                                continue
                             delay = random.randint(10, 120)
                             compensated_time = now + timedelta(seconds=delay)
                             job_id = f"{prefix}{idx}"
