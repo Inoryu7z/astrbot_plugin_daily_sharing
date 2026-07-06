@@ -30,26 +30,32 @@ class ImageService:
         else: return TimePeriod.LATE_NIGHT
 
     def _ensure_plugin(self):
-        if not self._aiimg_plugin and not self._aiimg_plugin_not_found:
-            supported_names = ["astrbot_plugin_aiimg", "astrbot_plugin_gitee_aiimg"]
+        supported_names = ["astrbot_plugin_aiimg", "astrbot_plugin_gitee_aiimg"]
 
-            for p in self.context.get_all_stars():
-                if p.name in supported_names:
-                    if hasattr(p, "star_instance") and p.star_instance:
-                        self._aiimg_plugin = p.star_instance
-                    elif hasattr(p, "instance") and p.instance:
-                        self._aiimg_plugin = p.instance
-                    else:
-                        self._aiimg_plugin = getattr(p, "star_cls", None)
-                        if self._aiimg_plugin:
-                            logger.debug(f"[DailySharing] 获取到 {p.name} 类引用 (非实例)")
+        # 每次重新获取当前插件实例，防止 aiimg 重载后引用过期
+        # 旧实例的 ProviderRegistry 只在 __init__ 加载一次，不会随配置更新而刷新
+        current = None
+        matched_name = ""
+        for p in self.context.get_all_stars():
+            if p.name in supported_names:
+                matched_name = p.name
+                if hasattr(p, "star_instance") and p.star_instance:
+                    current = p.star_instance
+                elif hasattr(p, "instance") and p.instance:
+                    current = p.instance
+                else:
+                    current = getattr(p, "star_cls", None)
+                    if current:
+                        logger.debug(f"[DailySharing] 获取到 {p.name} 类引用 (非实例)")
+                break
 
-                    if self._aiimg_plugin:
-                        logger.info(f"[DailySharing] 已找到AI图像插件: {p.name}")
-                    break
-
-            if not self._aiimg_plugin:
-                self._aiimg_plugin_not_found = True
+        if current is not self._aiimg_plugin:
+            if current:
+                logger.info(f"[DailySharing] 已绑定AI图像插件: {matched_name}")
+            else:
+                logger.debug("[DailySharing] 未找到AI图像插件")
+            self._aiimg_plugin = current
+            self._aiimg_plugin_not_found = current is None
 
     def _get_wardrobe_instance(self):
         if not self._wardrobe_plugin and not self._wardrobe_plugin_not_found:
