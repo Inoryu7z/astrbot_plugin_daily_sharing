@@ -348,7 +348,7 @@ class ImageService:
         try:
             import aiohttp
             async with aiohttp.ClientSession() as session:
-                async with session.get(video_url, timeout=aiohttp.ClientTimeout(total=120)) as resp:
+                async with session.get(video_url, timeout=aiohttp.ClientTimeout(total=300)) as resp:
                     if resp.status != 200:
                         logger.debug("[DailySharing] 下载视频失败: HTTP %d", resp.status)
                         return

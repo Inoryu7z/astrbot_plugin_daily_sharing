@@ -265,13 +265,13 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
 
         if provider_id:
             user_provider_id = provider_id
-            config_timeout = 120
+            config_timeout = 300
         elif persona_name:
             user_provider_id = self.get_persona_config_value(persona_name, "persona_llm_conf", "llm_provider_id", "")
-            config_timeout = 120
+            config_timeout = 300
         else:
             user_provider_id = ""
-            config_timeout = 120
+            config_timeout = 300
 
         current_provider_id = user_provider_id if user_provider_id else _get_system_default_provider()
 
