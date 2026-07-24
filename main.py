@@ -22,6 +22,7 @@ from .core.db import DatabaseManager
 from .core.tasks import TaskManager
 from .core.commands import CommandHandler
 from .core.persona_utils import PersonaConfigMixin
+from .core.smart_share import SmartShareScheduler
 
 class DailySharingPlugin(Star, PersonaConfigMixin):
     def __init__(self, context: Context, config: AstrBotConfig):
@@ -76,6 +77,7 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
         # 核心逻辑解耦器
         self.task_manager = TaskManager(self)
         self.command_handler = CommandHandler(self)
+        self.smart_scheduler = SmartShareScheduler(self)
         
         # 启动延迟初始化 Bot 缓存的任务
         bot_init_task = asyncio.create_task(self._delayed_init_bots())

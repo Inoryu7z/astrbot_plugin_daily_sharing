@@ -71,10 +71,19 @@ class TaskManager:
             return
 
         job_id_prefix = f"persona_{persona_name}_"
-        daily_sched_id = f"{job_id_prefix}daily_random_scheduler"
-        self._setup_cron_job_custom(daily_sched_id, "0 0 * * *", self._make_persona_daily_random_scheduler(persona_name))
-        self._spawn_bg_task(self._make_persona_daily_random_scheduler(persona_name)())
-        logger.debug(f"[DailySharing] 人格 [{persona_name}] 已启用多时间段随机生成模式")
+        smart_enabled = self.plugin.smart_scheduler._is_smart_share_enabled(persona_name)
+
+        if smart_enabled:
+            # 智能分享模式：注册 6 点 cron + 立即恢复/触发今日调度
+            self.plugin.smart_scheduler.setup_smart_cron(persona_name)
+            self._spawn_bg_task(self._smart_init_today(persona_name))
+            logger.info(f"[DailySharing] 人格 [{persona_name}] 已启用智能分享模式")
+        else:
+            # 原随机模式
+            daily_sched_id = f"{job_id_prefix}daily_random_scheduler"
+            self._setup_cron_job_custom(daily_sched_id, "0 0 * * *", self._make_persona_daily_random_scheduler(persona_name))
+            self._spawn_bg_task(self._make_persona_daily_random_scheduler(persona_name)())
+            logger.debug(f"[DailySharing] 人格 [{persona_name}] 已启用多时间段随机生成模式")
 
         self.setup_custom_target_crons(persona_name=persona_name)
 
@@ -87,6 +96,51 @@ class TaskManager:
             logger.debug(f"[DailySharing] 人格 [{persona_name}] 早报定时任务已启动 ({cron_briefing})")
 
         logger.debug(f"[DailySharing] 人格 [{persona_name}] 定时任务已挂载")
+
+    async def _smart_init_today(self, persona_name: str):
+        """智能分享初始化：插件加载时恢复今日任务，若今日未调度过则立即触发一次
+
+        场景：插件在 6 点之后被重载，原 6 点 cron 未触发，需要立即补调度。
+        失败时回退到原随机机制。
+        """
+        if self.plugin._is_terminated: return
+        try:
+            # 1. 先尝试恢复今日已存在的智能任务（state 存在但任务丢失的情况）
+            await self.plugin.smart_scheduler.recover_smart_state(persona_name)
+
+            # 2. 检查是否已有智能任务（恢复成功或今日已调度并执行完）
+            prefix = f"persona_{persona_name}_smart_"
+            existing = [j for j in self.scheduler.get_jobs() if j.id.startswith(prefix)]
+            if existing:
+                return
+
+            # 3. 检查今日是否已调度过（state 存在但任务已执行/跳过）
+            state = await self.db.get_state(
+                self.plugin.smart_scheduler._get_state_key(persona_name), {}
+            )
+            today_str = datetime.now().strftime("%Y-%m-%d")
+            if state.get("date") == today_str:
+                return
+
+            # 4. 今日未调度，立即触发
+            logger.info(f"[SmartShare] [{persona_name}] 插件加载时今日未调度，立即触发智能调度")
+            success = await self.plugin.smart_scheduler.run_smart_schedule(persona_name)
+            if not success and self.plugin.smart_scheduler._get_fallback_to_random(persona_name):
+                logger.info(f"[SmartShare] [{persona_name}] 初始化智能调度失败，回退到随机机制")
+                # 标记今日智能调度已失败，防止再次重载时重复触发
+                await self.plugin.smart_scheduler._mark_smart_failed(persona_name)
+                await self._make_persona_daily_random_scheduler(persona_name)()
+        except Exception as e:
+            logger.error(f"[DailySharing] 智能分享初始化失败 [{persona_name}]: {e}")
+            # 异常时也回退到随机，并标记今日智能调度已失败，防止重载后重复尝试
+            try:
+                await self.plugin.smart_scheduler._mark_smart_failed(persona_name)
+            except Exception:
+                pass
+            try:
+                await self._make_persona_daily_random_scheduler(persona_name)()
+            except Exception:
+                pass
 
     def setup_custom_target_crons(self, persona_name: str):
         receiver_conf = self.plugin.get_persona_receiver(persona_name)

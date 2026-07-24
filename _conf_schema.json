@@ -169,6 +169,44 @@
               }
             }
           },
+          "persona_smart_share_conf": {
+            "description": "🧠 智能分享调度",
+            "type": "object",
+            "hint": "基于 dayflow 日程智能选择两套穿搭各自的最佳分享时间点，替代随机分享",
+            "items": {
+              "enable_smart_share": {
+                "description": "启用智能分享",
+                "type": "bool",
+                "default": false,
+                "hint": "开启后每日 6 点由 LLM 分析 dayflow 日程，在两套穿搭穿着时段内各选一个最佳分享时间点。失败时自动回退到随机分享"
+              },
+              "smart_share_trigger_time": {
+                "description": "智能调度触发时间",
+                "type": "string",
+                "default": "06:00",
+                "hint": "每日触发 LLM 分析日程的时间（HH:MM）。建议设为 dayflow 日程生成之后"
+              },
+              "smart_share_llm_provider_id": {
+                "description": "智能调度专用LLM",
+                "type": "string",
+                "default": "",
+                "hint": "用于分析日程、选择分享时间点的独立 LLM。留空则使用人格默认 LLM",
+                "_special": "select_provider"
+              },
+              "smart_share_wait_dayflow_timeout": {
+                "description": "等待 dayflow 超时（分钟）",
+                "type": "int",
+                "default": 30,
+                "hint": "dayflow 日程未就绪时，主动触发生成后等待的最长时间"
+              },
+              "smart_share_fallback_to_random": {
+                "description": "失败时回退到随机分享",
+                "type": "bool",
+                "default": true,
+                "hint": "智能调度失败（LLM 超时/dayflow 未就绪/解析失败）时，是否回退到原随机分享机制"
+              }
+            }
+          },
           "persona_image_conf": {
             "description": "🎨 配图与视频",
             "type": "object",
