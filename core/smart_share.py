@@ -323,6 +323,33 @@ class SmartShareScheduler:
                 logger.warning(f"[SmartShare] 两个时间点间隔不足 2 小时: {t1} vs {t2}")
                 return False
 
+            # 校验 share_time 在 wear_window 内（如果提供了 wear_window）
+            # 防止 LLM 输出的分享时间超出穿搭时段，导致在角色已换装后分享错误的穿搭
+            for key in ("look_1", "look_2"):
+                look = look_times.get(key, {})
+                share_time = look.get("share_time", "")
+                wear_window = look.get("wear_window", "")
+                if not wear_window:
+                    continue
+                window = self._parse_window(wear_window)
+                if not window:
+                    continue
+                (sh, sm), (eh, em) = window
+                win_start = sh * 60 + sm
+                win_end = eh * 60 + em
+                # 跨日窗口（如 22:00-02:00）跳过校验，避免误判
+                if win_start > win_end:
+                    continue
+                share_parsed = self._parse_hhmm(share_time)
+                if not share_parsed:
+                    return False
+                share_mins = share_parsed[0] * 60 + share_parsed[1]
+                if not (win_start <= share_mins <= win_end):
+                    logger.warning(
+                        f"[SmartShare] {key} share_time {share_time} 不在 wear_window {wear_window} 内"
+                    )
+                    return False
+
             return True
         except Exception:
             return False
@@ -397,10 +424,12 @@ class SmartShareScheduler:
         now = datetime.now()
         today_str = now.strftime("%Y-%m-%d")
 
-        # 清理旧的智能任务
+        # 清理旧的智能任务和随机任务
+        # 同时清理 random_ 前缀：防止智能调度失败回退随机后，6 点 cron 成功导致两套任务并发重复分享
         prefix = f"persona_{persona_name}_smart_"
+        random_prefix = f"persona_{persona_name}_random_"
         for job in self.task_manager.scheduler.get_jobs():
-            if job.id.startswith(prefix):
+            if job.id.startswith(prefix) or job.id.startswith(random_prefix):
                 self.task_manager.scheduler.remove_job(job.id)
 
         # 准备状态
@@ -534,7 +563,11 @@ class SmartShareScheduler:
             task = asyncio.current_task()
             self.plugin._bg_tasks.add(task)
             try:
-                success = await self.run_smart_schedule(persona_name)
+                success = False
+                try:
+                    success = await self.run_smart_schedule(persona_name)
+                except Exception as e:
+                    logger.error(f"[SmartShare] [{persona_name}] 智能调度异常: {e}")
                 if success:
                     return
 
