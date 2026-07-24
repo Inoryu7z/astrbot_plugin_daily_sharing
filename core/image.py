@@ -503,7 +503,7 @@ class ImageService:
                 chain_override=chain_override,
             )
 
-            await self._auto_save_to_wardrobe(path_obj, resolved_persona)
+            await self._auto_save_to_wardrobe(path_obj, resolved_persona, prompt=final_prompt)
 
             if path_obj is None:
                 logger.error("[DailySharing] aiimg.edit.edit() 返回 None，自拍生成失败")
@@ -524,7 +524,7 @@ class ImageService:
                 logger.error(f"[DailySharing] 自拍生成出错: {e}")
                 return None, False
 
-    async def _auto_save_to_wardrobe(self, image_path, persona_name: str = ""):
+    async def _auto_save_to_wardrobe(self, image_path, persona_name: str = "", prompt: str = ""):
         wardrobe = self._get_wardrobe_instance()
         if not wardrobe or not hasattr(wardrobe, "_save_image_from_bytes"):
             return
@@ -544,6 +544,7 @@ class ImageService:
                 image_bytes,
                 persona=persona_name,
                 created_by="dailysharing",
+                ai_prompt=prompt or "",
             )
             if duplicate:
                 logger.debug("[DailySharing] 自动存图跳过：图片重复 (hash已存在)")
