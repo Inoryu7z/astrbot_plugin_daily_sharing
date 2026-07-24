@@ -186,8 +186,11 @@ class ContentService:
         res = await self.call_llm(prompt=user_prompt, system_prompt=system_prompt, timeout=15, persona_name=None)
         if not res: return None
         
-        # 清洗结果 (去除标点和多余空格)
-        topic = res.strip().split("\n")[0].replace("。", "").replace("《", "").replace("》", "")
+        # 清洗结果 (去除标点、引号、书名号和多余空格)
+        topic = res.strip().split("\n")[0]
+        for ch in ("。", "《", "》", '"', '"', '"', "'", "'", "'", "「", "」", "『", "』", "【", "】"):
+            topic = topic.replace(ch, "")
+        topic = topic.strip()
         return topic
 
     # ==================== 辅助方法 ====================
@@ -618,7 +621,8 @@ class ContentService:
 
 【事实核查指令】
 下面提供的新闻列表可能已经由系统预先完成了联网检索，包含了事件的真实细节。
-如果新闻下方附带有 `[真实事件细节]`，你**绝对不能只读标题自由脑补**，必须把其中的真相融入到你的文案中！
+如果新闻下方附带有 `[必须参考的真实背景]`，你**绝对不能只读标题自由脑补**，必须把其中的真相融入到你的文案中！
+如果新闻下方标注的是 `[真实背景]: 无`，则仅就标题做字面简评，严禁擅自编造细节。
 
 {user_info_prompt}
 {ctx['life_hint']}
@@ -1049,6 +1053,7 @@ class ContentService:
 你想向{target_str}吐槽一下——那种"小烦恼"，不是愤怒，是带点幽默的抱怨。
 
 {user_info_prompt}
+{ctx['life_hint']}
 {ctx['chat_hint']}
 {mood_hint}
 {activity_hint}
