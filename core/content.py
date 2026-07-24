@@ -11,6 +11,12 @@ from typing import Optional, Tuple, List, Dict
 from astrbot.api import logger
 from ..config import SharingType, TimePeriod, DEFAULT_REC_CATS, NEWS_SOURCE_MAP
 
+
+# 分享文案语义完整性指令：确保读者能看懂，不限制风格/字数/跳脱程度
+SHARE_SEMANTIC_INTEGRITY_BLOCK = """【重要：分享文案的语义完整性】
+读者不知道你的日程、项目、上下文。无论你的说话风格如何（简短、跳脱、术语化都可以），确保读者能看懂你在说什么——涉及的项目、人名、事件背景等读者无法获知的信息，必须有最低限度的交代，不要写出只有你自己看得懂的句子。如果你认为必须要长篇大论才能交代清楚时，考虑更换切入点，分享不宜字数过多。"""
+
+
 class ContentService:
     def __init__(self, config: Dict, llm_func, context, db_manager, news_service=None, plugin=None):
         """
@@ -343,9 +349,10 @@ class ContentService:
 1. 以你的人设性格说话，真实自然
 2. 基于当前真实时间问候
 3. 忽略群聊历史，直接开启新问候
-{greeting_constraint} 
-5. {'简短（80-100字）' if is_group else '可适当长一些（100-120字）'}
-6. 直接输出内容，不要解释
+{greeting_constraint}
+5. 直接输出分享文案
+
+{SHARE_SEMANTIC_INTEGRITY_BLOCK}
 
 请生成{p_label}问候："""
 
@@ -446,8 +453,9 @@ class ContentService:
 2. 分享此刻的感受、想法或小感悟
 3. 忽略群聊历史，直接开启新话题
 4. 基于当前真实时间感悟
-5. 字数：{'80-100字' if is_group else '100-120字'}
-6. 直接输出内容
+5. 直接输出分享文案
+
+{SHARE_SEMANTIC_INTEGRITY_BLOCK}
 
 你的随想："""
         
@@ -655,10 +663,11 @@ class ContentService:
 2. 选择{share_count}条你最感兴趣的热搜
 3. {'对每条' if share_count > 1 else '对这条'}热搜要有自己的真实观点，如果有事实细节，必须结合细节进行锐评，不能像没营养的复读机
 4. 观点真诚，避免过度情绪化或标题党式表达
-5. {'群聊中简洁有重点' if is_group else '私聊可以详细展开想法，并结合你当下的状态'}
+5. {'群聊中有重点' if is_group else '私聊可以详细展开想法，并结合你当下的状态'}
 6. 用【】标注热搜标题
-7. {'字数：120-150字' if is_group else '字数：150-200字'}
-8. 直接输出分享内容
+7. 直接输出分享文案
+
+{SHARE_SEMANTIC_INTEGRITY_BLOCK}
 
 直接输出："""
 
@@ -904,9 +913,10 @@ class ContentService:
 要求：
 1. 以你的人设性格说话，真实自然
 2. 基于你的真实梦境来写，但用自己的话重新组织
-3. 像随口说出来的感觉，简短随意
-4. 字数：60-100字
-5. 直接输出内容
+3. 像随口说出来的感觉，自然不刻意
+4. 直接输出分享文案
+
+{SHARE_SEMANTIC_INTEGRITY_BLOCK}
 
 你的梦境分享："""
 
@@ -998,9 +1008,10 @@ class ContentService:
 要求：
 1. 以你的人设性格说话，真实自然
 2. 必须基于你的【真实日程】和【真实心情】来写
-3. 像随手打字一样简短随意
-4. 字数：60-90字
-5. 直接输出内容
+3. 像随手打字一样自然
+4. 直接输出分享文案
+
+{SHARE_SEMANTIC_INTEGRITY_BLOCK}
 
 你的日常碎片："""
 
@@ -1080,8 +1091,9 @@ class ContentService:
 1. 以你的人设性格说话，真实自然
 2. 必须基于你的【真实日程】和【真实心情】来写
 3. 带点幽默或自嘲，不要太严肃
-4. 字数：60-90字
-5. 直接输出内容
+4. 直接输出分享文案
+
+{SHARE_SEMANTIC_INTEGRITY_BLOCK}
 
 你的吐槽："""
 
@@ -1210,8 +1222,9 @@ class ContentService:
 3. 真诚推荐，避免营销号式的夸张表达
 4. 结合资料介绍它的亮点。
 5. 务必用【】将推荐目标的名称【{target_work}】括起来。
-6. {'字数：100-120字' if is_group else '字数：120-150字'}。
-7. 直接输出推荐内容。
+6. 直接输出分享文案。
+
+{SHARE_SEMANTIC_INTEGRITY_BLOCK}
 """
 
         res = await self.call_llm(prompt=prompt, system_prompt=ctx['persona'], persona_name=ctx.get('persona_name'))
