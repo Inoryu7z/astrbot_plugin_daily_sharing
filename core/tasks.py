@@ -78,6 +78,30 @@ class TaskManager:
             self.plugin.smart_scheduler.setup_smart_cron(persona_name)
             self._spawn_bg_task(self._smart_init_today(persona_name))
             logger.info(f"[DailySharing] 人格 [{persona_name}] 已启用智能分享模式")
+            # 智能分享启用时，清理所有随机模式残留任务，防止旁路触发额外分享
+            # （用户从随机模式切到智能模式时，下列旧任务可能仍在调度器中：
+            #   - custom_share_* 独立目标 cron
+            #   - daily_random_scheduler 每日 0 点 cron（会在 08-10 点窗口重新注册 random_* 任务）
+            #   - random_* 随机分享 date 任务
+            # 其中 daily_random_scheduler 是 9 点额外分享的根因：0 点触发后注册 08-10 窗口的随机任务）
+            stale_prefixes = [
+                f"persona_{persona_name}_custom_share_",
+                f"persona_{persona_name}_random_",
+            ]
+            stale_exact_ids = [
+                f"persona_{persona_name}_daily_random_scheduler",
+            ]
+            stale_jobs = []
+            for j in self.scheduler.get_jobs():
+                if any(j.id.startswith(p) for p in stale_prefixes) or j.id in stale_exact_ids:
+                    stale_jobs.append(j.id)
+            for jid in stale_jobs:
+                try:
+                    self.scheduler.remove_job(jid)
+                except Exception:
+                    pass
+            if stale_jobs:
+                logger.info(f"[DailySharing] 人格 [{persona_name}] 智能分享已启用，清理 {len(stale_jobs)} 个随机模式残留任务: {stale_jobs}")
         else:
             # 原随机模式
             daily_sched_id = f"{job_id_prefix}daily_random_scheduler"
@@ -85,7 +109,8 @@ class TaskManager:
             self._spawn_bg_task(self._make_persona_daily_random_scheduler(persona_name)())
             logger.debug(f"[DailySharing] 人格 [{persona_name}] 已启用多时间段随机生成模式")
 
-        self.setup_custom_target_crons(persona_name=persona_name)
+            # 随机模式下才注册独立目标 cron；智能模式下由 smart_share 统一调度，避免旁路触发
+            self.setup_custom_target_crons(persona_name=persona_name)
 
         enable_60s = self.plugin.get_persona_config_value(persona_name, "persona_extra_shares", "enable_60s_news", False)
         enable_ai = self.plugin.get_persona_config_value(persona_name, "persona_extra_shares", "enable_ai_news", False)
@@ -206,6 +231,11 @@ class TaskManager:
             pname = persona_entry.get("persona_name") or persona_entry.get("name") or persona_entry.get("select_persona", "")
             if not pname: continue
             canonical = self.plugin._canonical_persona_name(pname) or pname
+            # 智能分享模式下不恢复随机模式的延迟分享任务：
+            # 随机模式失败回退时可能在 global_{persona} 留下 pending_delay_job（如 9:00），
+            # 智能分享后续成功注册 9:20/15:30 但未清理该字段，重载后这里会恢复出 9:00 的额外分享
+            if self.plugin.smart_scheduler._is_smart_share_enabled(canonical):
+                continue
             state_key = f"global_{canonical}"
             g_state = await self.db.get_state(state_key, {})
             pending = g_state.get("pending_delay_job")
@@ -248,6 +278,9 @@ class TaskManager:
             pname = persona_entry.get("persona_name") or persona_entry.get("name") or persona_entry.get("select_persona", "")
             if not pname: continue
             canonical = self.plugin._canonical_persona_name(pname) or pname
+            # 智能分享模式下不恢复独立目标（custom_share）的延迟任务，避免旁路触发额外分享
+            if self.plugin.smart_scheduler._is_smart_share_enabled(canonical):
+                continue
             receiver_conf = self.plugin.get_persona_receiver(canonical)
             default_adapter_id = self._resolve_adapter_id(f"_recover_{canonical}", receiver_conf=receiver_conf)
             r_groups = self._parse_targets_config(receiver_conf.get("groups", []))

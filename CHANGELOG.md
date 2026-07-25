@@ -1,3 +1,17 @@
+### v5.7.6
+
+**🐛 修复智能分享 9 点额外分享 + 跨人格时间冲突**
+
+*   **修复 9 点整额外分享（严重 bug）**：智能分享失败回退随机时，`_make_persona_daily_random_scheduler` 会在 `global_{persona}` state 写入 `pending_delay_job`（如 9:00）。后续智能分享成功注册 9:20/15:30 但未清理该字段，插件重载后 `_recover_pending_jobs` 读到残留的 `pending_delay_job` 并恢复出 `resume_auto_share` 一次性任务，导致 9:00 额外分享（9:00 + 9:20 + 15:30 = 三次）。根因不是 cron 定时，而是重载恢复的 date 任务。修复：1) `_recover_pending_jobs` 对智能分享人格跳过 `global_`/`target_` 延迟任务恢复；2) `register_smart_jobs` 成功时主动清理 `resume_auto_share` 任务和 `global_{persona}` 的 `pending_delay_job`；3) 额外清理随机模式残留 cron（`daily_random_scheduler`/`random_*`/`custom_share_*`）作为防御
+*   **修复跨人格时间冲突**：a、b 两人格原本各自独立选时，可能都分到 9:20 附近，体验不佳。现改为：
+    *   LLM 只返回穿搭时段 `wear_window`，不再返回具体分享时间点
+    *   由代码在 `wear_window` 内**随机**选时（以随机为主，09-11/14-17/19-21"合适时段"轻微加权，权重 1.5 vs 1.0）
+    *   跨人格协调：通过全局注册锁串行化，同一 umo（相同 adapter+groups+users）下先注册人格的时间点会加入冲突列表，后注册人格自动避开 ±2 小时范围；本人格两套穿搭也避免靠太近
+    *   冲突覆盖整个窗口时退化为纯随机，保证总能选出时间
+*   **修复 `analyze_schedule` 日志 KeyError**：LLM 不再返回 `share_time` 后，原日志仍引用 `share_time` 字段会抛异常
+
+---
+
 ### v5.7.5
 
 **✨ 新功能：智能分享调度系统**
