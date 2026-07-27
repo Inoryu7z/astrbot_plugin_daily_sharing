@@ -1601,16 +1601,39 @@ class TaskManager:
             should_send_text = False
 
         # 1. 分享文字
-        if should_send_text and clean_text: 
+        if should_send_text and clean_text:
+            # 尝试通过 PostSplitter 分段，让分享文案也能像真人聊天一样分段发送
+            segments = [clean_text]
+            postsplitter = None
             try:
-                text_chain = MessageChain().message(clean_text) 
-                if img_path and not video_url and not separate_img and not audio_path:
-                    if img_path.startswith("http"): text_chain.url_image(img_path)
-                    else: text_chain.file_image(img_path)
-                await self.plugin.context.send_message(uid, text_chain)
+                postsplitter = self.ctx_service._find_plugin("postsplitter")
+                if postsplitter and hasattr(postsplitter, "split_text_external"):
+                    result = postsplitter.split_text_external(clean_text)
+                    if result and len(result) > 1:
+                        segments = result
             except Exception as e:
-                logger.error(f"[DailySharing] 发送文字给 {uid} 失败: {e}")
-            
+                logger.debug(f"[DailySharing] PostSplitter 分段失败: {e}")
+
+            for i, seg in enumerate(segments):
+                is_last = (i == len(segments) - 1)
+                try:
+                    text_chain = MessageChain().message(seg)
+                    if is_last and img_path and not video_url and not separate_img and not audio_path:
+                        if img_path.startswith("http"): text_chain.url_image(img_path)
+                        else: text_chain.file_image(img_path)
+                    await self.plugin.context.send_message(uid, text_chain)
+                except Exception as e:
+                    logger.error(f"[DailySharing] 发送文字给 {uid} 失败: {e}")
+
+                if not is_last:
+                    delay = 1.0
+                    try:
+                        if postsplitter and hasattr(postsplitter, "get_segment_delay_external"):
+                            delay = postsplitter.get_segment_delay_external(seg)
+                    except Exception:
+                        pass
+                    await asyncio.sleep(max(0.5, min(delay, 5.0)))
+
             if audio_path or ((img_path or video_url) and separate_img):
                 await self.random_sleep(persona_name=persona_name)
 
