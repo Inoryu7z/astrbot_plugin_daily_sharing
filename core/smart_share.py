@@ -416,7 +416,7 @@ class SmartShareScheduler:
     def _get_conflict_times_for_umo(self, persona_name: str) -> list:
         """获取同一 umo 下其他人格已注册的智能分享时间点
 
-        扫描调度器中所有 persona_*_smart_* date 任务，
+        扫描调度器中所有 persona_*_smart_share_* date 任务，
         提取与当前人格共享同一 umo 的其他人格的分享时间（HH, MM）。
         """
         try:
@@ -437,7 +437,7 @@ class SmartShareScheduler:
             # 跳过 6 点 cron 调度任务（id 形如 persona_xxx_smart_scheduler）
             if jid.endswith("_smart_scheduler"):
                 continue
-            # 解析 persona_name: persona_{name}_smart_{idx}
+            # 解析 persona_name: persona_{name}_smart_share_{idx}
             # persona_name 可能含下划线，用 rfind 定位最后的 _smart_
             rest = jid[len("persona_"):]
             idx_pos = rest.rfind("_smart_")
@@ -555,18 +555,22 @@ class SmartShareScheduler:
         3. 跨人格协调：通过 _registration_lock 串行化注册，
            先注册的人格的时间点会加入冲突列表，后注册的人格自动避开
         4. 复用 _make_smart_task_wrapper → _make_task_wrapper，execute_share 链路完全不变
+
+        注意：任务 ID 使用 _smart_share_ 前缀，与 cron 的 _smart_scheduler 区分，
+        防止清理旧任务时误删 cron。
         """
         # 全局锁：串行化多人格注册，确保同 umo 下后注册者能看到先注册者的时间点
         async with self._registration_lock:
             now = datetime.now()
             today_str = now.strftime("%Y-%m-%d")
 
-            # 清理旧的智能任务和随机任务
+            # 清理旧的智能分享任务和随机任务
+            # 使用 _smart_share_ 前缀而非 _smart_，避免误删 smart_scheduler cron
             # 同时清理 random_ 前缀：防止智能调度失败回退随机后，6 点 cron 成功导致两套任务并发重复分享
-            prefix = f"persona_{persona_name}_smart_"
+            task_prefix = f"persona_{persona_name}_smart_share_"
             random_prefix = f"persona_{persona_name}_random_"
             for job in self.task_manager.scheduler.get_jobs():
-                if job.id.startswith(prefix) or job.id.startswith(random_prefix):
+                if job.id.startswith(task_prefix) or job.id.startswith(random_prefix):
                     self.task_manager.scheduler.remove_job(job.id)
 
             # 清理随机模式残留的延迟分享恢复任务和 state：
@@ -668,7 +672,7 @@ class SmartShareScheduler:
                         state[look_key]["skipped"] = True
                         continue
 
-                job_id = f"{prefix}{idx}"
+                job_id = f"{task_prefix}{idx}"
                 self.task_manager.scheduler.add_job(
                     self._make_smart_task_wrapper(persona_name, look_key),
                     'date',
@@ -683,6 +687,13 @@ class SmartShareScheduler:
 
             # 保存状态
             await self.db.update_state_dict(state_key, state)
+
+            # 防御性检查：确保 cron 未被误删（register_smart_jobs 清理由 _smart_share_ 前缀保护，
+            # 但以防其他路径意外移除，注册完任务后验证 cron 是否存活）
+            scheduler_jid = f"persona_{persona_name}_smart_scheduler"
+            if not self.task_manager.scheduler.get_job(scheduler_jid):
+                logger.warning(f"[SmartShare] [{persona_name}] cron 意外丢失，自动重新注册")
+                self.setup_smart_cron(persona_name)
 
     # ============ 主入口 ============
 
@@ -818,8 +829,9 @@ class SmartShareScheduler:
             return
 
         now = datetime.now()
-        prefix = f"persona_{persona_name}_smart_"
-        existing_jobs = [j for j in self.task_manager.scheduler.get_jobs() if j.id.startswith(prefix)]
+        # 使用 _smart_share_ 前缀区分任务与 cron（cron id 为 _smart_scheduler，不匹配此前缀）
+        task_prefix = f"persona_{persona_name}_smart_share_"
+        existing_jobs = [j for j in self.task_manager.scheduler.get_jobs() if j.id.startswith(task_prefix)]
 
         # 如果任务还存在，不处理
         if existing_jobs:
@@ -861,7 +873,7 @@ class SmartShareScheduler:
                     look_state["skipped"] = True
                     continue
 
-            job_id = f"{prefix}{idx}"
+            job_id = f"{task_prefix}{idx}"
             self.task_manager.scheduler.add_job(
                 self._make_smart_task_wrapper(persona_name, look_key),
                 'date',

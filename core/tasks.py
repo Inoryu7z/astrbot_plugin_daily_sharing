@@ -133,9 +133,16 @@ class TaskManager:
             # 1. 先尝试恢复今日已存在的智能任务（state 存在但任务丢失的情况）
             await self.plugin.smart_scheduler.recover_smart_state(persona_name)
 
-            # 2. 检查是否已有智能任务（恢复成功或今日已调度并执行完）
-            prefix = f"persona_{persona_name}_smart_"
-            existing = [j for j in self.scheduler.get_jobs() if j.id.startswith(prefix)]
+            # 1.1. 防御：确保 smart_scheduler cron 已注册（防止被意外移除后无人恢复）
+            scheduler_jid = f"persona_{persona_name}_smart_scheduler"
+            if not self.scheduler.get_job(scheduler_jid):
+                logger.info(f"[SmartShare] [{persona_name}] cron 已丢失，重新注册")
+                self.plugin.smart_scheduler.setup_smart_cron(persona_name)
+
+            # 2. 检查是否已有智能分享任务（恢复成功或今日已调度并执行完）
+            # 使用 _smart_share_ 前缀区分任务与 cron（cron id 为 _smart_scheduler，不匹配此前缀）
+            task_prefix = f"persona_{persona_name}_smart_share_"
+            existing = [j for j in self.scheduler.get_jobs() if j.id.startswith(task_prefix)]
             if existing:
                 return
 
