@@ -328,6 +328,68 @@ class TaskManager:
     def _resolve_persona_qzone_enabled(self, persona_name):
         return self.plugin.get_persona_config_value(persona_name, "persona_qzone_conf", "enable_qzone", False)
 
+    async def _ensure_qzone_account(self, persona_name: str, qzone_plugin):
+        """确保 QQ空间 daemon 绑定的是当前人格适配器对应的 QQ 账号
+
+        多 aiocqhttp 适配器场景下，qzone 插件的 _capture_onebot_client_from_context()
+        会取 platform_insts 中第一个 aiocqhttp 适配器的 cookie，可能不是当前人格对应的适配器，
+        导致人格 a 的内容被发布到人格 b 的 QQ 空间。
+
+        此方法在发布前校验 daemon 当前绑定的 login_uin 是否与人格适配器对应的 bot 一致，
+        不一致时强制重新绑定。
+        """
+        try:
+            receiver = self.plugin.get_persona_receiver(persona_name)
+            adapter_id = (receiver.get("adapter_id") or "").strip()
+            if not adapter_id:
+                return
+
+            bot = self.ctx_service._get_bot_instance(adapter_id)
+            if not bot:
+                return
+
+            # 获取预期 QQ 号
+            expected_uin = 0
+            try:
+                if hasattr(bot, "api") and hasattr(bot.api, "call_action"):
+                    ret = await bot.api.call_action("get_login_info")
+                    if isinstance(ret, dict):
+                        expected_uin = int(ret.get("user_id") or 0)
+                        if not expected_uin:
+                            data = ret.get("data")
+                            if isinstance(data, dict):
+                                expected_uin = int(data.get("user_id") or 0)
+            except Exception as e:
+                logger.debug(f"[DailySharing] 获取 bot 登录信息失败 [{adapter_id}]: {e}")
+
+            if not expected_uin:
+                return
+
+            # 获取 daemon 当前绑定的 QQ 号
+            try:
+                status = await qzone_plugin.controller.get_status(probe_daemon=False)
+            except Exception:
+                status = {}
+            current_uin = int(status.get("login_uin") or 0)
+
+            if current_uin == expected_uin:
+                return  # 已绑定正确账号
+
+            logger.warning(
+                f"[DailySharing] QQ空间 cookie 账号不匹配: 当前={current_uin}, 预期={expected_uin} "
+                f"[人格: {persona_name}, 适配器: {adapter_id}]，正在重新绑定..."
+            )
+
+            # 设置正确的 bot 并强制重新绑定 cookie
+            qzone_plugin._onebot_client = bot
+            if hasattr(qzone_plugin, "_legacy_cfg"):
+                qzone_plugin._legacy_cfg.client = bot
+
+            await qzone_plugin._ensure_cookie_ready(force=True)
+            logger.info(f"[DailySharing] QQ空间 cookie 已重新绑定到 {expected_uin}")
+        except Exception as e:
+            logger.warning(f"[DailySharing] 确保 QQ空间账号匹配失败 [{persona_name}]: {e}")
+
     def setup_qzone_cron(self, persona_name: str):
         sched_id = f"daily_qzone_random_scheduler_{persona_name}"
         self._setup_cron_job_custom(sched_id, "0 0 * * *", self._make_persona_qzone_random_scheduler(persona_name))
@@ -1272,6 +1334,8 @@ class TaskManager:
             qzone_plugin = self.ctx_service._find_plugin("qzone")
             if qzone_plugin and hasattr(qzone_plugin, "controller") and qzone_plugin.controller is not None:
                 logger.info("[DailySharing] 分享早报到QQ空间已开启...")
+                if persona_name:
+                    await self._ensure_qzone_account(persona_name, qzone_plugin)
                 for name, url in images_to_send:
                     try:
                         title = "【每天60秒读懂世界】" if "60s" in name else "【AI资讯快报】"
@@ -1477,6 +1541,10 @@ class TaskManager:
                 if event:
                     await event.send(event.plain_result("未检测到 astrbot_plugin_qzone 插件或 controller 不可用"))
                 return
+
+            # 多适配器场景下，确保 qzone daemon 绑定的是当前人格适配器对应的 QQ 账号
+            if persona_name:
+                await self._ensure_qzone_account(persona_name, qzone_plugin)
 
             period = self.get_curr_period()
             stype = force_type if force_type else await self.decide_type_with_state(period, is_qzone=True, specific_type="auto", persona_name=persona_name)
