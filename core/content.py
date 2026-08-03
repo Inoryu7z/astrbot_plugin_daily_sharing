@@ -1214,17 +1214,24 @@ class ContentService:
 
     def _find_grok_plugin(self):
         """查找 grok 联网搜索插件实例"""
+        logger.info("[内容服务] 开始查找 grok 插件...")
         try:
-            for p in self.context.get_all_stars():
+            stars = self.context.get_all_stars()
+            logger.info(f"[内容服务] get_all_stars 返回 {len(stars)} 个插件")
+            for p in stars:
                 p_id = getattr(p, "id", "") or ""
                 p_name = getattr(p, "name", "") or ""
                 if "grok" in p_id.lower() or "grok" in p_name.lower():
+                    logger.info(f"[内容服务] 找到 grok 插件: id={p_id}, name={p_name}")
                     for attr in ("star_instance", "instance", "star_cls"):
                         candidate = getattr(p, attr, None)
                         if candidate and hasattr(candidate, "_do_search"):
+                            logger.info(f"[内容服务] grok 插件实例已获取 (attr={attr})")
                             return candidate
+                    logger.warning(f"[内容服务] grok 插件找到但无法获取实例 (star_instance/instance/star_cls 均无效)")
         except Exception as e:
-            logger.debug(f"[内容服务] 查找 grok 插件失败: {e}")
+            logger.warning(f"[内容服务] 查找 grok 插件失败: {e}")
+        logger.warning("[内容服务] 未找到 grok 插件")
         return None
 
     def _get_topic_search_prompt(self, persona_name: str, candidate_count: int) -> str:
@@ -1247,13 +1254,19 @@ class ContentService:
         query = self._get_topic_search_prompt(persona_name, candidate_count)
         logger.info(f"[内容服务] 话题策略调用 grok 搜索 (候选数={candidate_count}, quality={prefer_quality})")
 
+        # grok _do_search 内部可能调用框架的 llm_generate（同步阻塞 HTTP），
+        # 会卡死主事件循环导致 asyncio.wait_for 超时无法触发。
+        # 放到子线程的事件循环里跑，同步阻塞只影响子线程，主事件循环超时可正常触发。
+        async def _run_in_subthread():
+            return await grok_plugin._do_search(
+                query=query,
+                system_prompt=TOPIC_GROK_SYSTEM_PROMPT,
+                prefer_quality=prefer_quality,
+            )
+
         try:
             result = await asyncio.wait_for(
-                grok_plugin._do_search(
-                    query=query,
-                    system_prompt=TOPIC_GROK_SYSTEM_PROMPT,
-                    prefer_quality=prefer_quality,
-                ),
+                asyncio.to_thread(asyncio.run, _run_in_subthread()),
                 timeout=120,
             )
         except asyncio.TimeoutError:
