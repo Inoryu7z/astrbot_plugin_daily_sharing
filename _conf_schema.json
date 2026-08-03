@@ -653,6 +653,75 @@
                 ]
               }
             }
+          },
+          "persona_topic_conf": {
+            "description": "💬 话题发起（群聊专用）",
+            "type": "object",
+            "hint": "基于 grok 联网搜索获取低门槛大众热议话题，由对话模型用人设语气发起讨论。仅适用于群聊场景，需安装 astrbot_plugin_grok_web_search 插件",
+            "items": {
+              "enable_topic": {
+                "description": "启用话题发起",
+                "type": "bool",
+                "default": false,
+                "hint": "开启后将在下方时间段内随机触发，向 topic_groups 配置的群聊发起话题讨论"
+              },
+              "topic_random_periods": {
+                "description": "话题随机触发时间段",
+                "type": "list",
+                "items": {
+                  "type": "string"
+                },
+                "default": [
+                  "12:00-14:00",
+                  "20:00-22:00"
+                ],
+                "hint": "格式：HH:MM-HH:MM。独立于主分享时间段"
+              },
+              "topic_groups": {
+                "description": "话题分享目标群聊",
+                "type": "list",
+                "items": {
+                  "type": "string"
+                },
+                "default": [],
+                "hint": "填入接收话题分享的群号。独立于主分享的 groups，留空则不分享"
+              },
+              "topic_llm_provider_id": {
+                "description": "话题生成专用LLM",
+                "type": "string",
+                "default": "",
+                "hint": "用于选题和生成文案的独立 LLM。留空则使用人格默认 LLM",
+                "_special": "select_provider"
+              },
+              "topic_grok_prefer_quality": {
+                "description": "grok 使用质量链路",
+                "type": "bool",
+                "default": false,
+                "hint": "关闭走速度优先链路（推荐，覆盖绝大多数场景）；开启走质量优先链路，成本更高耗时更长"
+              },
+              "topic_candidate_count": {
+                "description": "grok 返回候选条数",
+                "type": "int",
+                "default": 6,
+                "slider": {
+                  "min": 3,
+                  "max": 10,
+                  "step": 1
+                },
+                "hint": "grok 单次搜索返回的话题候选数量，推荐 5-8"
+              },
+              "topic_dedup_days": {
+                "description": "话题去重天数",
+                "type": "int",
+                "default": 7,
+                "slider": {
+                  "min": 1,
+                  "max": 30,
+                  "step": 1
+                },
+                "hint": "按话题名去重，N 天内不会重复发起同一话题"
+              }
+            }
           }
         }
       }
@@ -700,5 +769,25 @@
     "editor_language": "markdown",
     "editor_theme": "vs-dark",
     "default": "你是一个视频动效设计师。用户会给你一张美少女的生活照，你需要描述这张照片变成5秒视频后的动态效果。\n\n只输出动态描述，不要任何解释或格式标记。5秒视频，只写微小自然的动态，不要大幅度动作或场景切换。\n\n输出必须以\"参考图片中的少女形象，她\"开头，然后依次描述以下内容，用逗号连接：\n1. 她在画面中的姿态和正在做的事\n2. 她身上最打动人的细节动起来——必须基于图片实际内容，突出她的可爱、魅力或者性感\n3. 背景环境中自然发生的动态变化（风吹、水动、物品晃动等）\n4. 适合当前构图的运镜方式\n5. 光线或色彩的微妙变化\n以\"电影感，高质量，流畅\"结尾。"
+  },
+  "topic_search_prompt": {
+    "description": "话题搜索提示词模板",
+    "hint": "话题发起策略中 grok 联网搜索的提示词模板。支持变量：{date}（当前日期）、{candidate_count}（候选条数）。留空使用默认",
+    "type": "text",
+    "obvious_hint": true,
+    "editor_mode": true,
+    "editor_language": "markdown",
+    "editor_theme": "vs-dark",
+    "default": "今天是 {date}。请搜索过去 48 小时内，中文互联网上正在热议的、普通网民基于常识和生活经验就能发表观点的话题 {candidate_count} 条。\n\n话题要求：\n- 知识门槛低：不需要游戏/番剧/数码/学术等专业背景就能聊\n- 有观点空间：存在\"你怎么看\"的争议面，不是单纯事实报道\n- 大众领域：社会现象、消费争议、生活方式、职场教育、公共道德、人情世故等\n\n避开：\n- 需要专业背景的圈内话题（游戏配队、番剧细节、数码参数、行业黑话）\n- 纯灾情/事故/敏感政治\n- 纯娱乐八卦（除非有大众讨论价值）\n\n返回 JSON：\n{\n  \"topics\": [\n    { \"name\": \"话题名\", \"background\": \"2-3句话详细说清来龙去脉\", \"controversy\": \"大众在争论什么，有哪些不同观点\" }\n  ]\n}"
+  },
+  "topic_content_prompt": {
+    "description": "话题文案提示词模板",
+    "hint": "话题发起策略中 LLM 选题+生成文案的提示词模板。支持变量：{date_str}、{time_str}、{period_label}、{candidates_formatted}（格式化后的候选列表）。留空使用默认",
+    "type": "text",
+    "obvious_hint": true,
+    "editor_mode": true,
+    "editor_language": "markdown",
+    "editor_theme": "vs-dark",
+    "default": "【当前时间】{date_str} {time_str} ({period_label})\n你刚刷到几条今天网上正在热议的话题，想挑一条和群聊分享一下你的看法。\n\n【候选话题】\n{candidates_formatted}\n\n【选题要求】\n1. 选一条你能基于常识和生活经验说出自己看法的\n2. 优先选和你人设性格/价值观有共鸣的——这样你的评价会更自然\n3. 如果所有候选都需要你不了解的专业领域知识 → 仅输出 [NO_FIT]\n\n【文案要求】\n- 用你自己的话简述一下事情经过，让群友知道你在聊什么\n  （背景融入你的表达里，不要像播报新闻一样干巴巴陈述事实）\n- 然后给出你的评价：一个态度、一点感慨或一个小立场\n- 整体一段话，用你的说话方式，真实自然\n- 评价本身能让想附和或反驳的人有话可接\n- 字数控制：够说清楚事情 + 表达态度即可，不要长篇大论\n\n【严禁】\n- 严禁假装是某领域专家，严禁深度分析\n- 严禁下绝对定论，留有讨论空间\n- 严禁编造话题里没有的细节\n- 严禁像新闻稿一样罗列背景事实\n- 严禁使用\"看大家聊得这么开心\"等评价群氛围的话\n- 严禁@任何人\n\n直接输出分享文案。"
   }
 }

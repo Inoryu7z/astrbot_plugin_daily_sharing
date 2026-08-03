@@ -60,12 +60,17 @@ class TaskManager:
         if qzone_enabled:
             self.setup_qzone_cron(persona_name=persona_name)
 
+        topic_enabled = self._resolve_persona_topic_enabled(persona_name)
+        logger.info(f"[DailySharing] 人格 [{persona_name}] 话题策略={'启用' if topic_enabled else '未启用'}")
+        if topic_enabled:
+            self.setup_topic_cron(persona_name=persona_name)
+
         persona_receiver = self.plugin.get_persona_receiver(persona_name)
         has_targets = bool(persona_receiver.get("groups") or persona_receiver.get("users"))
 
         if not has_targets:
-            if qzone_enabled:
-                logger.info(f"[DailySharing] 人格 [{persona_name}] 仅启用QQ空间任务（无群聊/私聊目标）")
+            if qzone_enabled or topic_enabled:
+                logger.info(f"[DailySharing] 人格 [{persona_name}] 仅启用QQ空间/话题任务（无主分享目标）")
             else:
                 logger.info(f"[DailySharing] 人格 [{persona_name}] 未配置接收对象，跳过定时任务")
             return
@@ -280,6 +285,29 @@ class TaskManager:
                     logger.debug(f"[DailySharing] 检测到近期错过的QQ空间延迟任务[{canonical}]，即将执行补偿分享")
                 else:
                     await self.db.update_state_dict(qzone_key, {"pending_delay_job": None})
+
+        for persona_entry in self.plugin.get_enabled_personas():
+            pname = persona_entry.get("persona_name") or persona_entry.get("name") or persona_entry.get("select_persona", "")
+            if not pname: continue
+            canonical = self.plugin._canonical_persona_name(pname) or pname
+            if not self._resolve_persona_topic_enabled(canonical):
+                continue
+            topic_key = f"topic_{canonical}"
+            topic_state = await self.db.get_state(topic_key, {})
+            t_pending = topic_state.get("pending_delay_job")
+            if t_pending:
+                target_ts = t_pending.get("target_time", 0)
+                job_id = f"resume_topic_share_{canonical}"
+                if target_ts > now_ts:
+                    run_time = datetime.fromtimestamp(target_ts)
+                    self.scheduler.add_job(self._make_topic_task_wrapper(canonical), 'date', run_date=run_time, id=job_id, replace_existing=True)
+                    logger.debug(f"[DailySharing] 已恢复未完成的话题延迟任务[{canonical}]，将在 {run_time.strftime('%H:%M:%S')} 执行")
+                elif 0 <= now_ts - target_ts < 3600:
+                    run_time = now + timedelta(seconds=10)
+                    self.scheduler.add_job(self._make_topic_task_wrapper(canonical), 'date', run_date=run_time, id=job_id, replace_existing=True)
+                    logger.debug(f"[DailySharing] 检测到近期错过的话题延迟任务[{canonical}]，即将执行补偿分享")
+                else:
+                    await self.db.update_state_dict(topic_key, {"pending_delay_job": None})
 
         for persona_entry in self.plugin.get_enabled_personas():
             pname = persona_entry.get("persona_name") or persona_entry.get("name") or persona_entry.get("select_persona", "")
@@ -1151,8 +1179,16 @@ class TaskManager:
                             target_type_enum = v
                             break
                 if not target_type_enum:
-                    await event.send(event.plain_result(f"不支持的分享类型：{share_type}。支持：自动, 问候, 新闻, 心情, 日常, 吐槽, 梦境, 推荐, 60s新闻, AI资讯。"))
+                    await event.send(event.plain_result(f"不支持的分享类型：{share_type}。支持：自动, 问候, 新闻, 心情, 日常, 吐槽, 梦境, 推荐, 话题, 60s新闻, AI资讯。"))
                     return
+
+            # 话题策略：走独立的搜索+选题管线，不走标准生成流程
+            if target_type_enum == SharingType.TOPIC:
+                uid = event.get_sender_id()
+                target_umo = event.unified_msg_origin if not ":" in str(uid) else uid
+                await event.send(event.plain_result("正在搜索热议话题并生成讨论..."))
+                await self.execute_topic_share(persona_name=persona_name, specific_target=target_umo)
+                return
 
             # 映射新闻源 (中文 -> key)
             news_src_key = None
@@ -1662,6 +1698,246 @@ class TaskManager:
                     await event.send(event.plain_result(f"生成并分享到QQ空间失败: {e}"))
                 except:
                     pass
+
+    # ==================== 话题发起策略（群聊专用） ====================
+
+    def _resolve_persona_topic_enabled(self, persona_name):
+        return self.plugin.get_persona_config_value(persona_name, "persona_topic_conf", "enable_topic", False)
+
+    def setup_topic_cron(self, persona_name: str):
+        sched_id = f"daily_topic_random_scheduler_{persona_name}"
+        self._setup_cron_job_custom(sched_id, "0 0 * * *", self._make_persona_topic_random_scheduler(persona_name))
+        self._spawn_bg_task(self._make_persona_topic_random_scheduler(persona_name)())
+        logger.debug(f"[DailySharing] 人格 [{persona_name}] 话题策略已启用多时间段随机生成模式")
+
+    def _make_persona_topic_random_scheduler(self, persona_name: str):
+        async def scheduler():
+            if self.plugin._is_terminated: return
+            prefix = f"persona_{persona_name}_topic_random_"
+            job_ids = [job.id for job in self.scheduler.get_jobs() if job.id.startswith(prefix)]
+            for jid in job_ids:
+                self.scheduler.remove_job(jid)
+
+            periods = self.plugin.get_persona_config_value(persona_name, "persona_topic_conf", "topic_random_periods", ["12:00-14:00", "20:00-22:00"])
+
+            now = datetime.now()
+            date_str = now.strftime("%Y-%m-%d")
+            state_key = f"topic_{persona_name}"
+            state = await self.db.get_state(state_key, {})
+            topic_schedule = state.get("random_schedule", {})
+
+            is_modified = False
+            if topic_schedule.get("date") != date_str:
+                topic_schedule = {"date": date_str, "jobs": {}, "executed_periods": []}
+                is_modified = True
+
+            if "executed_periods" not in topic_schedule:
+                topic_schedule["executed_periods"] = []
+                is_modified = True
+
+            jobs = topic_schedule.get("jobs", {})
+            executed_periods = topic_schedule.get("executed_periods", [])
+            stale_periods = [p for p in jobs.keys() if p not in periods]
+            for p in stale_periods:
+                del jobs[p]
+                is_modified = True
+
+            for period_str in periods:
+                if period_str not in jobs:
+                    try:
+                        start_str, end_str = period_str.split('-')
+                        start_h, start_m = map(int, start_str.split(':'))
+                        end_h, end_m = map(int, end_str.split(':'))
+                        start_dt = now.replace(hour=start_h, minute=start_m, second=0, microsecond=0)
+                        end_dt = now.replace(hour=end_h, minute=end_m, second=59, microsecond=0)
+                        if end_dt <= start_dt: continue
+                        random_seconds = random.randint(0, int((end_dt - start_dt).total_seconds()))
+                        run_time = start_dt + timedelta(seconds=random_seconds)
+                        jobs[period_str] = run_time.timestamp()
+                        is_modified = True
+                    except Exception as e:
+                        logger.error(f"[DailySharing] 解析话题时间段 {period_str} 失败: {e}")
+
+            if is_modified:
+                topic_schedule["jobs"] = jobs
+                await self.db.update_state_dict(state_key, {"random_schedule": topic_schedule})
+
+            for idx, (period_str, timestamp) in enumerate(jobs.items()):
+                run_time = datetime.fromtimestamp(timestamp)
+                if run_time > now:
+                    job_id = f"{prefix}{idx}"
+                    self.scheduler.add_job(
+                        self._make_topic_task_wrapper(persona_name), 'date',
+                        run_date=run_time, id=job_id, replace_existing=True
+                    )
+                    logger.debug(f"[DailySharing] 人格 [{persona_name}] 今日话题任务 [{period_str}] 已安排在: {run_time.strftime('%H:%M:%S')} 执行")
+                else:
+                    try:
+                        start_str, end_str = period_str.split('-')
+                        end_h, end_m = map(int, end_str.split(':'))
+                        end_dt = now.replace(hour=end_h, minute=end_m, second=59, microsecond=0)
+                        grace_dt = end_dt + timedelta(minutes=30)
+                        if now <= grace_dt:
+                            if period_str in executed_periods:
+                                logger.info(f"[DailySharing] skip compensate: topic period {period_str} already executed")
+                                continue
+                            delay = random.randint(10, 120)
+                            compensated_time = now + timedelta(seconds=delay)
+                            job_id = f"{prefix}{idx}"
+                            self.scheduler.add_job(
+                                self._make_topic_task_wrapper(persona_name), 'date',
+                                run_date=compensated_time, id=job_id, replace_existing=True
+                            )
+                            jobs[period_str] = compensated_time.timestamp()
+                            topic_schedule["jobs"] = jobs
+                            await self.db.update_state_dict(state_key, {"random_schedule": topic_schedule})
+                            logger.info(f"[DailySharing] 人格 [{persona_name}] 话题随机时间已过但仍在时段内，补偿安排在: {compensated_time.strftime('%H:%M:%S')} 执行")
+                        else:
+                            logger.info(f"[DailySharing] 人格 [{persona_name}] 话题时段 [{period_str}] 的随机时间已过且超出宽限期，跳过今日话题分享")
+                    except Exception as e:
+                        logger.warning(f"[DailySharing] 话题补偿调度失败 [{period_str}]: {e}")
+
+            nearest_future_ts = None
+            for period_str, ts in jobs.items():
+                rt = datetime.fromtimestamp(ts)
+                if rt > now:
+                    if nearest_future_ts is None or ts < nearest_future_ts:
+                        nearest_future_ts = ts
+            if nearest_future_ts is not None:
+                await self.db.update_state_dict(state_key, {"pending_delay_job": {"target_time": nearest_future_ts}})
+        return scheduler
+
+    def _make_topic_task_wrapper(self, persona_name: str):
+        async def wrapper():
+            if self.plugin._is_terminated: return
+            task = asyncio.current_task()
+            self.plugin._bg_tasks.add(task)
+            try:
+                state_key = f"topic_{persona_name}"
+                await self.db.update_state_dict(state_key, {"pending_delay_job": None})
+                now = datetime.now()
+                debounce_key = f"topic_{persona_name}"
+                last_time = self.plugin._last_share_time.get(debounce_key)
+                if last_time:
+                    if (now - last_time).total_seconds() < 60:
+                        logger.debug(f"[DailySharing] 检测到近期已执行话题任务[人格: {persona_name}]，跳过本次触发。")
+                        return
+                lock = self._get_lock(persona_name)
+                if lock.locked():
+                    logger.warning(f"[DailySharing] 上一个任务正在进行中[人格: {persona_name}]，跳过话题触发。")
+                    return
+                async with lock:
+                    self.plugin._last_share_time[debounce_key] = now
+                    await self._mark_current_period_executed(state_key, now)
+                    logger.info(f"[DailySharing] 开始执行话题分享任务 [人格: {persona_name}]...")
+                    await self.execute_topic_share(persona_name=persona_name)
+            finally:
+                self.plugin._bg_tasks.discard(task)
+        return wrapper
+
+    def get_topic_targets(self, persona_name: str):
+        targets = []
+        receiver_conf = self.plugin.get_persona_receiver(persona_name)
+        default_adapter_id = self._resolve_adapter_id("get_topic_targets", receiver_conf=receiver_conf)
+
+        if default_adapter_id:
+            t_groups = self.plugin.get_persona_config_value(persona_name, "persona_topic_conf", "topic_groups", [])
+            for gid in t_groups:
+                gid_clean = str(gid).split(":")[0].strip()
+                if gid_clean:
+                    targets.append(f"{default_adapter_id}:GroupMessage:{gid_clean}")
+        return targets
+
+    async def execute_topic_share(self, persona_name: str = None, specific_target: str = None):
+        if self.plugin._is_terminated: return
+
+        logger.info(f"[DailySharing] 开始执行话题分享任务 [人格: {persona_name}]")
+
+        # 1. 获取配置
+        candidate_count = self.plugin.get_persona_config_value(persona_name, "persona_topic_conf", "topic_candidate_count", 6)
+        prefer_quality = self.plugin.get_persona_config_value(persona_name, "persona_topic_conf", "topic_grok_prefer_quality", False)
+        dedup_days = self.plugin.get_persona_config_value(persona_name, "persona_topic_conf", "topic_dedup_days", 7)
+        llm_provider_id = self.plugin.get_persona_config_value(persona_name, "persona_topic_conf", "topic_llm_provider_id", "")
+
+        # 2. 获取目标群
+        targets = []
+        if specific_target:
+            targets.append(specific_target)
+        else:
+            targets = self.get_topic_targets(persona_name=persona_name)
+
+        if not targets:
+            logger.warning(f"[DailySharing] [{persona_name}] 话题策略未配置目标群，跳过")
+            return
+
+        # 3. 调 grok 搜索候选话题
+        candidates = await self.content_service._fetch_grok_topics(persona_name, candidate_count, prefer_quality)
+        if not candidates:
+            logger.warning(f"[DailySharing] [{persona_name}] grok 未返回候选话题，跳过本次话题分享")
+            return
+
+        # 4. 去重：取所有目标群的已用话题并集
+        used_topics = set()
+        for uid in targets:
+            used = await self.db.get_used_topics(uid, "topic", days_limit=dedup_days)
+            used_topics.update(used)
+
+        fresh_candidates = [t for t in candidates if t.get("name", "") not in used_topics]
+        if not fresh_candidates:
+            logger.info(f"[DailySharing] [{persona_name}] 所有候选话题近期已使用过，跳过本次话题分享")
+            return
+
+        # 5. 构建上下文
+        period = self.get_curr_period()
+        persona_info = await self.content_service._get_persona_info(persona_name=persona_name)
+        now = datetime.now()
+        ctx = {
+            "persona": persona_info.get("prompt", ""),
+            "period_label": self.content_service._get_period_label(period),
+            "date_str": now.strftime("%Y年%m月%d日"),
+            "time_str": now.strftime("%H:%M"),
+            "persona_name": persona_name,
+            "topic_llm_provider_id": llm_provider_id,
+        }
+
+        # 6. LLM 选题 + 生成文案
+        content = await self.content_service._gen_topic(ctx, fresh_candidates)
+
+        if not content or content == "[NO_FIT]":
+            logger.info(f"[DailySharing] [{persona_name}] 话题策略未生成有效文案，跳过本次分享")
+            return
+
+        # 7. 提取选中话题名（用于去重记录）
+        selected_topic_name = ""
+        for t in fresh_candidates:
+            if t.get("name", "") and t["name"] in content:
+                selected_topic_name = t["name"]
+                break
+        if not selected_topic_name:
+            selected_topic_name = content[:20]
+
+        # 8. 发送到所有目标群并记录
+        for uid in targets:
+            if self.plugin._is_terminated: break
+            try:
+                await self.send(uid, content, None, persona_name=persona_name)
+
+                await self.db.record_topic(uid, "topic", selected_topic_name, persona_name=persona_name or "")
+
+                clean_content_for_log = re.sub(r'\$\$(?:EMO:)?(?:happy|sad|angry|neutral|surprise)\$\$', '', content, flags=re.IGNORECASE).strip()
+                await self.db.add_sent_history(
+                    target_id=uid,
+                    sharing_type="topic",
+                    content=clean_content_for_log[:100] + "...",
+                    success=True,
+                    persona_name=persona_name or ""
+                )
+
+                await asyncio.sleep(2)
+            except Exception as e:
+                logger.error(f"[DailySharing] 话题分享发送到 {uid} 失败: {e}")
+
+        logger.info(f"[DailySharing] [{persona_name}] 话题分享完成，选中话题: {selected_topic_name}")
 
     async def send(self, uid, text, img_path, audio_path=None, video_url=None, persona_name: str = None):
         if self.plugin._is_terminated: return

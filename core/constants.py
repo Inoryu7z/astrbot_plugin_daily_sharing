@@ -8,7 +8,8 @@ TYPE_CN_MAP = {
     "life_moment": "日常",
     "rant": "吐槽",
     "dream": "梦境",
-    "recommendation": "推荐"
+    "recommendation": "推荐",
+    "topic": "话题"
 }
 
 # 输入指令映射表
@@ -19,7 +20,8 @@ CMD_CN_MAP = {
     "日常": SharingType.LIFE_MOMENT,
     "吐槽": SharingType.RANT,
     "梦境": SharingType.DREAM,
-    "推荐": SharingType.RECOMMENDATION
+    "推荐": SharingType.RECOMMENDATION,
+    "话题": SharingType.TOPIC
 }
 
 # 新闻源中文映射表

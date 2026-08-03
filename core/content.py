@@ -9,7 +9,19 @@ from functools import partial
 from datetime import datetime
 from typing import Optional, Tuple, List, Dict
 from astrbot.api import logger
-from ..config import SharingType, TimePeriod, DEFAULT_REC_CATS, NEWS_SOURCE_MAP
+from ..config import SharingType, TimePeriod, DEFAULT_REC_CATS, NEWS_SOURCE_MAP, DEFAULT_TOPIC_SEARCH_PROMPT, DEFAULT_TOPIC_CONTENT_PROMPT
+
+
+# 话题策略：grok 搜索专用 system_prompt（要求把 topics JSON 放进 content 字段，兼容 grok 的 parse_sources_from_message）
+TOPIC_GROK_SYSTEM_PROMPT = (
+    "You are a topic research assistant with real-time search capabilities. "
+    "Search for trending discussion topics on the Chinese internet that ordinary netizens can discuss based on common sense. "
+    "Return ONLY a single JSON object with keys: "
+    "content (string, MUST be a valid JSON string containing an array of topic objects, each with name/background/controversy fields), "
+    "sources (array of objects with url/title/snippet). "
+    "The content field MUST be a JSON string, not a plain text description. "
+    "Do NOT use Markdown formatting."
+)
 
 
 # 分享文案语义完整性指令：确保读者能看懂，不限制风格/字数/跳脱程度
@@ -1237,3 +1249,167 @@ class ContentService:
             except: pass
             return f"推荐类型: {rec_type} - {sub_style}\n\n{res}"
         return None
+
+    # ==================== 话题发起策略（群聊专用） ====================
+
+    def _find_grok_plugin(self):
+        """查找 grok 联网搜索插件实例"""
+        try:
+            for p in self.context.get_all_stars():
+                p_id = getattr(p, "id", "") or ""
+                p_name = getattr(p, "name", "") or ""
+                if "grok" in p_id.lower() or "grok" in p_name.lower():
+                    for attr in ("star_instance", "instance", "star_cls"):
+                        candidate = getattr(p, attr, None)
+                        if candidate and hasattr(candidate, "_do_search"):
+                            return candidate
+        except Exception as e:
+            logger.debug(f"[内容服务] 查找 grok 插件失败: {e}")
+        return None
+
+    def _get_topic_search_prompt(self, persona_name: str, candidate_count: int) -> str:
+        """获取话题搜索提示词（支持用户自定义模板）"""
+        tmpl = self.config.get("topic_search_prompt", "") or DEFAULT_TOPIC_SEARCH_PROMPT
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        return tmpl.format(date=date_str, candidate_count=candidate_count)
+
+    def _get_topic_content_prompt(self) -> str:
+        """获取话题文案提示词模板（支持用户自定义）"""
+        return self.config.get("topic_content_prompt", "") or DEFAULT_TOPIC_CONTENT_PROMPT
+
+    async def _fetch_grok_topics(self, persona_name: str, candidate_count: int, prefer_quality: bool) -> List[Dict]:
+        """调 grok 联网搜索，返回候选话题列表"""
+        grok_plugin = self._find_grok_plugin()
+        if not grok_plugin:
+            logger.warning("[内容服务] 未找到 grok 联网搜索插件，话题策略无法执行")
+            return []
+
+        query = self._get_topic_search_prompt(persona_name, candidate_count)
+        logger.info(f"[内容服务] 话题策略调用 grok 搜索 (候选数={candidate_count}, quality={prefer_quality})")
+
+        try:
+            result = await grok_plugin._do_search(
+                query=query,
+                system_prompt=TOPIC_GROK_SYSTEM_PROMPT,
+                prefer_quality=prefer_quality,
+            )
+        except Exception as e:
+            logger.error(f"[内容服务] grok 搜索异常: {e}")
+            return []
+
+        if not result or not result.get("ok"):
+            err = result.get("error", "未知错误") if result else "无返回"
+            logger.warning(f"[内容服务] grok 搜索失败: {err}")
+            return []
+
+        content = result.get("content", "") or ""
+        if not content:
+            logger.warning("[内容服务] grok 返回 content 为空")
+            return []
+
+        # content 应为 topics JSON 字符串；解析失败则尝试从 raw 提取
+        topics = self._parse_topic_json(content)
+        if not topics and result.get("raw"):
+            topics = self._parse_topic_json(result["raw"])
+
+        if not topics:
+            logger.warning(f"[内容服务] 无法从 grok 返回解析话题列表，content 前200字: {content[:200]}")
+            return []
+
+        logger.info(f"[内容服务] grok 返回 {len(topics)} 条候选话题: {[t.get('name','?') for t in topics]}")
+        return topics
+
+    @staticmethod
+    def _parse_topic_json(text: str) -> List[Dict]:
+        """从文本中解析话题 JSON 列表（容错：支持裸 JSON 数组、{topics:[...]}、Markdown 代码块）"""
+        if not text or not text.strip():
+            return []
+        text = text.strip()
+
+        # 尝试直接解析
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, list):
+                return [t for t in parsed if isinstance(t, dict)]
+            if isinstance(parsed, dict):
+                if "topics" in parsed and isinstance(parsed["topics"], list):
+                    return [t for t in parsed["topics"] if isinstance(t, dict)]
+                # 可能是单条话题对象
+                if "name" in parsed:
+                    return [parsed]
+        except json.JSONDecodeError:
+            pass
+
+        # 尝试从 Markdown 代码块提取
+        code_block_pattern = r"```(?:json)?\s*\n?([\s\S]*?)\n?```"
+        matches = re.findall(code_block_pattern, text)
+        for match in matches:
+            try:
+                parsed = json.loads(match.strip())
+                if isinstance(parsed, list):
+                    return [t for t in parsed if isinstance(t, dict)]
+                if isinstance(parsed, dict) and "topics" in parsed:
+                    return [t for t in parsed["topics"] if isinstance(t, dict)]
+            except json.JSONDecodeError:
+                continue
+
+        # 尝试提取第一个 [ 到最后一个 ]
+        start = text.find("[")
+        end = text.rfind("]")
+        if start != -1 and end != -1 and end > start:
+            try:
+                parsed = json.loads(text[start:end + 1])
+                if isinstance(parsed, list):
+                    return [t for t in parsed if isinstance(t, dict)]
+            except json.JSONDecodeError:
+                pass
+
+        return []
+
+    @staticmethod
+    def _format_candidates(topics: List[Dict]) -> str:
+        """把候选话题列表格式化成 LLM 可读的文本"""
+        lines = []
+        for i, t in enumerate(topics, 1):
+            name = t.get("name", "")
+            bg = t.get("background", "")
+            ctr = t.get("controversy", "")
+            lines.append(f"{i}. {name}")
+            if bg:
+                lines.append(f"   背景：{bg}")
+            if ctr:
+                lines.append(f"   争议点：{ctr}")
+        return "\n".join(lines)
+
+    async def _gen_topic(self, ctx: dict, candidates: List[Dict]) -> Optional[str]:
+        """LLM 选题 + 生成文案。返回文案字符串；LLM 判定无合适话题时返回 [NO_FIT]"""
+        candidates_formatted = self._format_candidates(candidates)
+
+        tmpl = self._get_topic_content_prompt()
+        prompt = tmpl.format(
+            date_str=ctx['date_str'],
+            time_str=ctx['time_str'],
+            period_label=ctx['period_label'],
+            candidates_formatted=candidates_formatted,
+        )
+
+        # 话题策略专用 LLM（留空则用人格默认）
+        provider_id = ctx.get('topic_llm_provider_id', '') or None
+
+        res = await self.call_llm(
+            prompt=prompt,
+            system_prompt=ctx['persona'],
+            persona_name=ctx.get('persona_name'),
+            provider_id=provider_id,
+        )
+
+        if not res:
+            logger.warning("[内容服务] 话题策略 LLM 无响应")
+            return None
+
+        # 检测兜底标记
+        if "[NO_FIT]" in res:
+            logger.info("[内容服务] LLM 判定所有候选话题均不合人设，跳过本次话题分享")
+            return "[NO_FIT]"
+
+        return res
