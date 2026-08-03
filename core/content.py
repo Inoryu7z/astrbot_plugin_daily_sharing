@@ -1248,14 +1248,22 @@ class ContentService:
         logger.info(f"[内容服务] 话题策略调用 grok 搜索 (候选数={candidate_count}, quality={prefer_quality})")
 
         try:
-            result = await grok_plugin._do_search(
-                query=query,
-                system_prompt=TOPIC_GROK_SYSTEM_PROMPT,
-                prefer_quality=prefer_quality,
+            result = await asyncio.wait_for(
+                grok_plugin._do_search(
+                    query=query,
+                    system_prompt=TOPIC_GROK_SYSTEM_PROMPT,
+                    prefer_quality=prefer_quality,
+                ),
+                timeout=120,
             )
+        except asyncio.TimeoutError:
+            logger.error("[内容服务] grok 搜索超时（120秒），跳过本次话题分享")
+            return []
         except Exception as e:
             logger.error(f"[内容服务] grok 搜索异常: {e}")
             return []
+
+        logger.info(f"[内容服务] grok 搜索返回，ok={result.get('ok') if result else 'None'}")
 
         if not result or not result.get("ok"):
             err = result.get("error", "未知错误") if result else "无返回"
@@ -1356,16 +1364,29 @@ class ContentService:
         # 话题策略专用 LLM（留空则用人格默认）
         provider_id = ctx.get('topic_llm_provider_id', '') or None
 
-        res = await self.call_llm(
-            prompt=prompt,
-            system_prompt=ctx['persona'],
-            persona_name=ctx.get('persona_name'),
-            provider_id=provider_id,
-        )
+        logger.info(f"[内容服务] 话题策略调用 LLM 选题+生成文案 (provider={provider_id or '默认'})")
+        try:
+            res = await asyncio.wait_for(
+                self.call_llm(
+                    prompt=prompt,
+                    system_prompt=ctx['persona'],
+                    persona_name=ctx.get('persona_name'),
+                    provider_id=provider_id,
+                ),
+                timeout=90,
+            )
+        except asyncio.TimeoutError:
+            logger.error("[内容服务] 话题策略 LLM 调用超时（90秒），跳过本次话题分享")
+            return None
+        except Exception as e:
+            logger.error(f"[内容服务] 话题策略 LLM 调用异常: {e}")
+            return None
 
         if not res:
             logger.warning("[内容服务] 话题策略 LLM 无响应")
             return None
+
+        logger.info(f"[内容服务] 话题策略 LLM 返回文案长度: {len(res)}")
 
         # 检测兜底标记
         if "[NO_FIT]" in res:

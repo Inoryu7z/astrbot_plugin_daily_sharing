@@ -1858,6 +1858,7 @@ class TaskManager:
         prefer_quality = self.plugin.get_persona_config_value(persona_name, "persona_topic_conf", "topic_grok_prefer_quality", False)
         dedup_days = self.plugin.get_persona_config_value(persona_name, "persona_topic_conf", "topic_dedup_days", 7)
         llm_provider_id = self.plugin.get_persona_config_value(persona_name, "persona_topic_conf", "topic_llm_provider_id", "")
+        logger.info(f"[DailySharing] [{persona_name}] 话题配置: candidate_count={candidate_count}, prefer_quality={prefer_quality}, dedup_days={dedup_days}, llm_provider={llm_provider_id or '默认'}")
 
         # 2. 获取目标群
         targets = []
@@ -1870,7 +1871,10 @@ class TaskManager:
             logger.warning(f"[DailySharing] [{persona_name}] 话题策略未配置目标群，跳过")
             return
 
+        logger.info(f"[DailySharing] [{persona_name}] 话题目标群: {targets}")
+
         # 3. 调 grok 搜索候选话题
+        logger.info(f"[DailySharing] [{persona_name}] 开始调用 grok 搜索候选话题...")
         candidates = await self.content_service._fetch_grok_topics(persona_name, candidate_count, prefer_quality)
         if not candidates:
             logger.warning(f"[DailySharing] [{persona_name}] grok 未返回候选话题，跳过本次话题分享")
@@ -1887,6 +1891,8 @@ class TaskManager:
             logger.info(f"[DailySharing] [{persona_name}] 所有候选话题近期已使用过，跳过本次话题分享")
             return
 
+        logger.info(f"[DailySharing] [{persona_name}] 去重后剩余 {len(fresh_candidates)}/{len(candidates)} 条候选话题")
+
         # 5. 构建上下文
         period = self.get_curr_period()
         persona_info = await self.content_service._get_persona_info(persona_name=persona_name)
@@ -1901,6 +1907,7 @@ class TaskManager:
         }
 
         # 6. LLM 选题 + 生成文案
+        logger.info(f"[DailySharing] [{persona_name}] 开始调用 LLM 选题+生成文案...")
         content = await self.content_service._gen_topic(ctx, fresh_candidates)
 
         if not content or content == "[NO_FIT]":
