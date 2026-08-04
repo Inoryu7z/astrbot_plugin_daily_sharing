@@ -60,6 +60,23 @@ class ContentService:
         
         self._session: aiohttp.ClientSession | None = None
 
+    def _debug_log(self, msg: str, level: str = "INFO"):
+        """绕过日志缓冲，直接同步写文件 + flush，用于诊断卡死位置"""
+        try:
+            from datetime import datetime as _dt
+            line = f"[{_dt.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}] [DBG] [{level}] {msg}\n"
+            # data_dir 在 plugin 上；ContentService 持有 plugin 引用
+            base = getattr(self.plugin, "data_dir", None) or "/tmp"
+            dbg_path = os.path.join(str(base), "dailysharing_debug.log")
+            with open(dbg_path, "a", encoding="utf-8") as f:
+                f.write(line)
+                f.flush()
+                os.fsync(f.fileno())
+        except Exception:
+            pass
+        # 同时打常规日志
+        getattr(logger, level.lower(), logger.info)(f"[内容服务] {msg}")
+
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession()
@@ -1309,8 +1326,9 @@ class ContentService:
         except Exception as _diag_e:
             logger.warning(f"[内容服务] grok 诊断异常: {_diag_e}")
 
+        self._debug_log(f"调用 _get_topic_search_prompt 前")
         query = self._get_topic_search_prompt(persona_name, candidate_count)
-        logger.warning(f"[内容服务] 即将调用 grok._do_search (query长度={len(query)})")
+        self._debug_log(f"即将调用 grok._do_search (query长度={len(query)})")
 
         # 用 create_task + 显式超时 + 取消：wait_for 在主循环被同步阻塞时无法触发超时回调，
         # create_task 把协程包成 Task 后，loop.stop() 或外部调度仍可强制取消。
@@ -1325,15 +1343,15 @@ class ContentService:
         try:
             result = await asyncio.wait_for(search_task, timeout=90)
         except asyncio.TimeoutError:
-            logger.error("[内容服务] grok 搜索超时(90s)，强制取消任务，跳过本次话题分享")
+            self._debug_log("grok 搜索超时(90s)，强制取消任务，跳过本次话题分享", level="ERROR")
             search_task.cancel()
             return []
         except Exception as e:
-            logger.error(f"[内容服务] grok 搜索异常: {e}")
+            self._debug_log(f"grok 搜索异常: {e}", level="ERROR")
             search_task.cancel()
             return []
 
-        logger.warning(f"[内容服务] grok._do_search 返回, ok={result.get('ok') if result else 'None'}")
+        self._debug_log(f"grok._do_search 返回, ok={result.get('ok') if result else 'None'}")
 
         if not result or not result.get("ok"):
             err = result.get("error", "未知错误") if result else "无返回"
