@@ -1212,25 +1212,56 @@ class ContentService:
 
     # ==================== 话题发起策略（群聊专用） ====================
 
-    def _find_grok_plugin(self):
-        """查找 grok 联网搜索插件实例"""
-        logger.info("[内容服务] 开始查找 grok 插件...")
+    GROK_PLUGIN_NAME = "astrbot_plugin_grok_web_search_Inoryu7z"
+
+    def _iter_loaded_stars(self):
         try:
             stars = self.context.get_all_stars()
-            logger.info(f"[内容服务] get_all_stars 返回 {len(stars)} 个插件")
-            for p in stars:
-                p_id = getattr(p, "id", "") or ""
-                p_name = getattr(p, "name", "") or ""
-                if "grok" in p_id.lower() or "grok" in p_name.lower():
-                    logger.info(f"[内容服务] 找到 grok 插件: id={p_id}, name={p_name}")
-                    for attr in ("star_instance", "instance", "star_cls"):
-                        candidate = getattr(p, attr, None)
-                        if candidate and hasattr(candidate, "_do_search"):
-                            logger.info(f"[内容服务] grok 插件实例已获取 (attr={attr})")
-                            return candidate
-                    logger.warning(f"[内容服务] grok 插件找到但无法获取实例 (star_instance/instance/star_cls 均无效)")
         except Exception as e:
-            logger.warning(f"[内容服务] 查找 grok 插件失败: {e}")
+            logger.debug(f"[内容服务] get_all_stars 失败: {e}")
+            return []
+        result = []
+        for item in stars or []:
+            star_obj = getattr(item, "star", None)
+            if star_obj is None and hasattr(item, "instance"):
+                star_obj = getattr(item, "instance", None)
+            if star_obj is None and hasattr(item, "plugin"):
+                star_obj = getattr(item, "plugin", None)
+            if star_obj is None and hasattr(item, "obj"):
+                star_obj = getattr(item, "obj", None)
+            if star_obj is None and not isinstance(item, (str, int, float, bool, list, tuple, set, dict)):
+                star_obj = item
+            if star_obj is not None:
+                result.append(star_obj)
+        return result
+
+    def _find_grok_plugin(self):
+        """查找 grok 联网搜索插件实例（参考 dayflow 两段式查找）"""
+        plugin_name = self.GROK_PLUGIN_NAME
+        validator = lambda obj: hasattr(obj, "_do_search")
+        try:
+            stars = self.context.get_all_stars()
+        except Exception as e:
+            logger.debug(f"[内容服务] get_all_stars 失败（查找 {plugin_name}）: {e}")
+            stars = []
+        for meta in stars or []:
+            meta_name = str(getattr(meta, "name", "") or "").strip()
+            root_dir_name = str(getattr(meta, "root_dir_name", "") or "").strip()
+            module_path = str(getattr(meta, "module_path", "") or "").strip()
+            if meta_name != plugin_name and root_dir_name != plugin_name and plugin_name not in module_path:
+                continue
+            for attr in ("star", "instance", "plugin", "obj", "star_cls"):
+                candidate = getattr(meta, attr, None)
+                if candidate is not None:
+                    if validator is None or validator(candidate):
+                        logger.info(f"[内容服务] grok 插件实例已获取 (attr={attr})")
+                        return candidate
+        for star in self._iter_loaded_stars():
+            cls_module = getattr(star.__class__, "__module__", "")
+            if plugin_name in cls_module:
+                if validator is None or validator(star):
+                    logger.info("[内容服务] grok 插件实例已获取 (回退到 _iter_loaded_stars)")
+                    return star
         logger.warning("[内容服务] 未找到 grok 插件")
         return None
 
@@ -1245,7 +1276,7 @@ class ContentService:
         return self.config.get("topic_content_prompt", "") or DEFAULT_TOPIC_CONTENT_PROMPT
 
     async def _fetch_grok_topics(self, persona_name: str, candidate_count: int, prefer_quality: bool) -> List[Dict]:
-        """调 grok 联网搜索，返回候选话题列表"""
+        """调 grok 联网搜索，返回候选话题列表（参考 dayflow 直接 await，依赖 grok 内部 timeout）"""
         grok_plugin = self._find_grok_plugin()
         if not grok_plugin:
             logger.warning("[内容服务] 未找到 grok 联网搜索插件，话题策略无法执行")
@@ -1254,23 +1285,18 @@ class ContentService:
         query = self._get_topic_search_prompt(persona_name, candidate_count)
         logger.info(f"[内容服务] 话题策略调用 grok 搜索 (候选数={candidate_count}, quality={prefer_quality})")
 
-        # grok _do_search 内部可能调用框架的 llm_generate（同步阻塞 HTTP），
-        # 会卡死主事件循环导致 asyncio.wait_for 超时无法触发。
-        # 放到子线程的事件循环里跑，同步阻塞只影响子线程，主事件循环超时可正常触发。
-        async def _run_in_subthread():
-            return await grok_plugin._do_search(
+        # 参考 dayflow：直接 await grok._do_search，开启 use_retry，依赖 grok 内部 timeout（默认 60s）
+        # 不使用 asyncio.to_thread(asyncio.run, ...) 子线程隔离——grok 内部访问 self.context.llm_generate
+        # 等依赖主事件循环的协程，放到子线程的新事件循环里会卡死，导致主循环 wait_for 超时无法触发。
+        try:
+            result = await grok_plugin._do_search(
                 query=query,
                 system_prompt=TOPIC_GROK_SYSTEM_PROMPT,
                 prefer_quality=prefer_quality,
-            )
-
-        try:
-            result = await asyncio.wait_for(
-                asyncio.to_thread(asyncio.run, _run_in_subthread()),
-                timeout=120,
+                use_retry=True,
             )
         except asyncio.TimeoutError:
-            logger.error("[内容服务] grok 搜索超时（120秒），跳过本次话题分享")
+            logger.error("[内容服务] grok 搜索超时，跳过本次话题分享")
             return []
         except Exception as e:
             logger.error(f"[内容服务] grok 搜索异常: {e}")
