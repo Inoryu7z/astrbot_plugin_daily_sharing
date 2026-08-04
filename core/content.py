@@ -1284,9 +1284,14 @@ class ContentService:
 
     def _get_topic_search_prompt(self, persona_name: str, candidate_count: int) -> str:
         """获取话题搜索提示词（支持用户自定义模板）"""
+        self._debug_log(f"_get_topic_search_prompt: 读取 config 前")
         tmpl = self.config.get("topic_search_prompt", "") or DEFAULT_TOPIC_SEARCH_PROMPT
+        self._debug_log(f"_get_topic_search_prompt: tmpl 类型={type(tmpl).__name__}, 长度={len(tmpl)}")
         date_str = datetime.now().strftime("%Y-%m-%d")
-        return tmpl.format(date=date_str, candidate_count=candidate_count)
+        self._debug_log(f"_get_topic_search_prompt: format 前, date_str={date_str}")
+        result = tmpl.format(date=date_str, candidate_count=candidate_count)
+        self._debug_log(f"_get_topic_search_prompt: format 完成, 结果长度={len(result)}")
+        return result
 
     def _get_topic_content_prompt(self) -> str:
         """获取话题文案提示词模板（支持用户自定义）"""
