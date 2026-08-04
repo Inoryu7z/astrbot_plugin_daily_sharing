@@ -1276,27 +1276,47 @@ class ContentService:
         return self.config.get("topic_content_prompt", "") or DEFAULT_TOPIC_CONTENT_PROMPT
 
     async def _fetch_grok_topics(self, persona_name: str, candidate_count: int, prefer_quality: bool) -> List[Dict]:
-        """调 grok 联网搜索，返回候选话题列表（参考 dayflow 直接 await，依赖 grok 内部 timeout）"""
+        """调 grok 联网搜索，返回候选话题列表"""
+        logger.info(f"[内容服务] _fetch_grok_topics 入口 (persona={persona_name}, count={candidate_count}, quality={prefer_quality})")
         grok_plugin = self._find_grok_plugin()
         if not grok_plugin:
             logger.warning("[内容服务] 未找到 grok 联网搜索插件，话题策略无法执行")
             return []
 
+        # 诊断：确认拿到的对象类型与关键属性（排查 star_cls 是否为类、config/context 是否有效）
+        try:
+            _gtype = type(grok_plugin).__name__
+            _gmodule = getattr(grok_plugin.__class__, "__module__", "")
+            _has_ctx = hasattr(grok_plugin, "context") and grok_plugin.context is not None
+            _has_cfg = hasattr(grok_plugin, "config") and isinstance(getattr(grok_plugin, "config", None), dict)
+            _use_builtin = grok_plugin.config.get("use_builtin_provider", False) if _has_cfg else "无config"
+            _provider = grok_plugin.config.get("provider", "") if _has_cfg else "无config"
+            _timeout_cfg = grok_plugin.config.get("timeout_seconds", 60) if _has_cfg else "无config"
+            logger.info(
+                f"[内容服务] grok 诊断: type={_gtype}, module={_gmodule}, "
+                f"has_context={_has_ctx}, has_config={_has_cfg}, "
+                f"use_builtin_provider={_use_builtin}, provider={_provider}, timeout={_timeout_cfg}"
+            )
+        except Exception as _diag_e:
+            logger.warning(f"[内容服务] grok 诊断异常: {_diag_e}")
+
         query = self._get_topic_search_prompt(persona_name, candidate_count)
         logger.info(f"[内容服务] 话题策略调用 grok 搜索 (候选数={candidate_count}, quality={prefer_quality})")
 
-        # 参考 dayflow：直接 await grok._do_search，开启 use_retry，依赖 grok 内部 timeout（默认 60s）
-        # 不使用 asyncio.to_thread(asyncio.run, ...) 子线程隔离——grok 内部访问 self.context.llm_generate
-        # 等依赖主事件循环的协程，放到子线程的新事件循环里会卡死，导致主循环 wait_for 超时无法触发。
+        # 用 wait_for 包裹加超时兜底：grok use_builtin_provider=True 分支调 context.llm_generate 无超时，
+        # provider 卡住会永久阻塞；此处强制 90s 超时，避免任务卡死。
         try:
-            result = await grok_plugin._do_search(
-                query=query,
-                system_prompt=TOPIC_GROK_SYSTEM_PROMPT,
-                prefer_quality=prefer_quality,
-                use_retry=True,
+            result = await asyncio.wait_for(
+                grok_plugin._do_search(
+                    query=query,
+                    system_prompt=TOPIC_GROK_SYSTEM_PROMPT,
+                    prefer_quality=prefer_quality,
+                    use_retry=True,
+                ),
+                timeout=90,
             )
         except asyncio.TimeoutError:
-            logger.error("[内容服务] grok 搜索超时，跳过本次话题分享")
+            logger.error("[内容服务] grok 搜索超时(90s)，跳过本次话题分享")
             return []
         except Exception as e:
             logger.error(f"[内容服务] grok 搜索异常: {e}")
