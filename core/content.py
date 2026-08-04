@@ -1288,9 +1288,11 @@ class ContentService:
         tmpl = self.config.get("topic_search_prompt", "") or DEFAULT_TOPIC_SEARCH_PROMPT
         self._debug_log(f"_get_topic_search_prompt: tmpl 类型={type(tmpl).__name__}, 长度={len(tmpl)}")
         date_str = datetime.now().strftime("%Y-%m-%d")
-        self._debug_log(f"_get_topic_search_prompt: format 前, date_str={date_str}")
-        result = tmpl.format(date=date_str, candidate_count=candidate_count)
-        self._debug_log(f"_get_topic_search_prompt: format 完成, 结果长度={len(result)}")
+        self._debug_log(f"_get_topic_search_prompt: replace 前, date_str={date_str}")
+        # 用 replace 替代 str.format()：format() 遇到未转义的 { 会抛 KeyError/ValueError，
+        # 而 replace 是纯字符串替换，不会解析占位符语法，更安全
+        result = tmpl.replace("{date}", date_str).replace("{candidate_count}", str(candidate_count))
+        self._debug_log(f"_get_topic_search_prompt: replace 完成, 结果长度={len(result)}")
         return result
 
     def _get_topic_content_prompt(self) -> str:
