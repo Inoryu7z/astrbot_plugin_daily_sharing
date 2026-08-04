@@ -1290,12 +1290,21 @@ class ContentService:
             _has_ctx = hasattr(grok_plugin, "context") and grok_plugin.context is not None
             _has_cfg = hasattr(grok_plugin, "config") and isinstance(getattr(grok_plugin, "config", None), dict)
             _use_builtin = grok_plugin.config.get("use_builtin_provider", False) if _has_cfg else "无config"
-            _provider = grok_plugin.config.get("provider", "") if _has_cfg else "无config"
             _timeout_cfg = grok_plugin.config.get("timeout_seconds", 60) if _has_cfg else "无config"
+            # use_builtin_provider=False 时实际用的是 providers 列表；True 时用 provider 字段
+            _providers_list = grok_plugin.config.get("providers", []) if _has_cfg else []
+            _providers_count = len(_providers_list) if isinstance(_providers_list, list) else "非list"
+            _providers_summary = ""
+            if isinstance(_providers_list, list) and _providers_list:
+                _providers_summary = "; ".join(
+                    f"{i+1}.{p.get('base_url','')[:40]}/{p.get('model','')}"
+                    for i, p in enumerate(_providers_list)
+                    if isinstance(p, dict)
+                )
             logger.info(
-                f"[内容服务] grok 诊断: type={_gtype}, module={_gmodule}, "
-                f"has_context={_has_ctx}, has_config={_has_cfg}, "
-                f"use_builtin_provider={_use_builtin}, provider={_provider}, timeout={_timeout_cfg}"
+                f"[内容服务] grok 诊断: type={_gtype}, use_builtin_provider={_use_builtin}, "
+                f"providers_count={_providers_count}, timeout={_timeout_cfg}, "
+                f"providers=[{_providers_summary}]"
             )
         except Exception as _diag_e:
             logger.warning(f"[内容服务] grok 诊断异常: {_diag_e}")
