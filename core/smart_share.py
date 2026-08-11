@@ -21,35 +21,47 @@ from astrbot.api import logger
 
 SMART_SHARE_SYSTEM_PROMPT = "你是专业的日程分析助手，只输出 JSON 对象，不要任何解释或代码块标记。"
 
-SMART_SHARE_USER_PROMPT_TEMPLATE = """你是穿搭时段识别助手。基于以下当日日程，识别两套穿搭各自的穿着时段。
+SMART_SHARE_USER_PROMPT_TEMPLATE = """你是穿搭时段识别与分享时间选择助手。基于以下当日日程，识别两套穿搭各自的穿着时段，并为每套穿搭选择一个最佳分享时间点。
 
 ## 当日日程
 {schedule_text}
 
+## 换装定义（重要）
+- **第一套（look_1）**：早上出门穿的装扮，从起床换装后开始穿着
+- **第二套（look_2）**：午后换装的装扮，是正装更换，**换装时间一般不晚于18点**
+- **睡衣/睡袍不算换装**：深夜回家换上睡衣只是"换睡衣"，不是正装更换，不能把睡衣时段当作 look_2 的穿着时段
+- 如果当日午后有正装换装，look_2 的 wear_window 从换装完成到当日最后活动结束（换睡衣前）；如果当日没有午后正装换装，look_2 的 wear_window 结束于晚间活动结束，不要把睡衣时段算进去
+
 ## 任务
 1. 从日程和穿搭描述中识别两套穿搭（晨间第一套 和 午后第二套）的穿着时段
 2. 给出每套穿搭的 wear_window（穿着时段，格式 HH:MM-HH:MM）
-3. wear_window 必须满足：
-   - 必须是当天实际穿着该套穿搭的连续时段
-   - 起始时间 = 该套穿搭换装完成时间
-   - 结束时间 = 该套穿搭被换下时间（或当日最后活动结束时间）
-   - 不能跨日（如 22:00-02:00 应改写为 22:00-23:59）
-   - 第一套 wear_window 的结束时间应 ≤ 第二套 wear_window 的起始时间
+3. 为每套穿搭选择一个 share_time（分享时间点，格式 HH:MM），必须在对应 wear_window 内
 
-## 注意
-- **不需要**选择具体的分享时间点，分享时间由系统在 wear_window 内随机选择
-- **不需要**判断哪个时间点"适合分享"，只需准确识别穿着时段
+## wear_window 规则
+- 必须是当天实际穿着该套穿搭的连续时段
+- 起始时间 = 该套穿搭换装完成时间
+- 结束时间 = 该套穿搭被换下时间（或当日最后活动结束时间）
+- 不能跨日（如 22:00-02:00 应改写为 22:00-23:59）
+- 第一套 wear_window 的结束时间应 ≤ 第二套 wear_window 的起始时间
+
+## share_time 选择原则
+1. **早**：在 wear_window 内尽量偏早。例：wear_window 为 07:00-15:00，share_time 选 09:00 左右而非 14:00
+2. **开阔**：优先选角色活动在"住处外"的时段（操场、舞蹈室、街道、咖啡馆等非住处场景），避免选角色在卧室/卫生间的时段
+3. **明亮**：分享时间不要太晚，避免依赖室内昏暗光源照明的时段（如深夜仅开台灯/夜灯的时段），优先选自然光充足或室内照明明亮的时段
+4. **均匀**：{uniform_hint}
 
 ## 输出 JSON
 只输出 JSON 对象，不要任何解释或代码块标记：
 {{
   "look_1": {{
     "wear_window": "08:00-13:30",
-    "reason": "晨间穿搭，从起床换装后到午后换装前"
+    "share_time": "09:00",
+    "reason": "晨间穿搭，从起床换装后到午后换装前。09:00 在操场活动，自然光充足"
   }},
   "look_2": {{
     "wear_window": "13:30-22:00",
-    "reason": "午后换装后到晚间活动结束"
+    "share_time": "15:00",
+    "reason": "午后换装后到晚间活动结束。15:00 在舞蹈室，光线明亮且非住处"
   }}
 }}"""
 
@@ -68,7 +80,8 @@ class SmartShareScheduler:
         self.task_manager = plugin.task_manager
         # 正在运行智能调度的 persona 集合，防止 6 点 cron 与 _smart_init_today 并发
         self._running_personas = set()
-        # 跨人格注册时的全局锁：防止多 persona 同时 register_smart_jobs 导致同 umo 时间冲突
+        # 跨人格串行化锁：串行化 analyze_schedule + register_smart_jobs，
+        # 让后注册者的 LLM 能看到先注册者的 share_time，实现均匀分布
         self._registration_lock = asyncio.Lock()
 
     # ============ 配置读取 ============
@@ -255,10 +268,26 @@ class SmartShareScheduler:
 
         return "\n\n".join(parts)
 
-    def _build_analyze_prompt(self, dayflow_data: dict) -> str:
-        """构建 LLM 分析提示词"""
+    def _build_analyze_prompt(self, dayflow_data: dict, existing_shares: list = None) -> str:
+        """构建 LLM 分析提示词
+
+        Args:
+            dayflow_data: dayflow 日程数据
+            existing_shares: 同 umo 下其他角色已选的分享时间 [(h, m), ...]，供 LLM 均匀分布参考
+        """
         schedule_text = self._build_schedule_text(dayflow_data)
-        return SMART_SHARE_USER_PROMPT_TEMPLATE.format(schedule_text=schedule_text)
+        if existing_shares:
+            times_str = "、".join(f"{h:02d}:{m:02d}" for (h, m) in existing_shares)
+            uniform_hint = (
+                f"已知其他角色分享时间为 [{times_str}]，请让你的两个 share_time 与这些时间点"
+                f"在时间轴上均匀分布，避免扎堆"
+            )
+        else:
+            uniform_hint = "当日暂无其他角色分享时间参考，按早/开阔/明亮原则选择即可"
+        return SMART_SHARE_USER_PROMPT_TEMPLATE.format(
+            schedule_text=schedule_text,
+            uniform_hint=uniform_hint
+        )
 
     def _parse_llm_response(self, response: str) -> Optional[dict]:
         """解析 LLM 输出的 JSON"""
@@ -281,6 +310,12 @@ class SmartShareScheduler:
         try:
             data = json.loads(text[start:end + 1])
             if "look_1" in data and "look_2" in data:
+                # 校验每套穿搭都含 share_time 字段
+                for key in ("look_1", "look_2"):
+                    look = data.get(key, {})
+                    if not isinstance(look, dict) or not look.get("share_time"):
+                        logger.warning(f"[SmartShare] {key} 缺少 share_time 字段: {look}")
+                        return None
                 return data
         except Exception:
             pass
@@ -309,10 +344,11 @@ class SmartShareScheduler:
         return None
 
     def _validate_look_times(self, look_times: dict) -> bool:
-        """验证 LLM 输出的 wear_window 是否合理
+        """验证 LLM 输出的 wear_window 和 share_time 是否合理
 
-        新流程：LLM 只返回 wear_window，share_time 由代码在 wear_window 内随机选择。
-        因此只校验 wear_window 的格式和合理性，不再校验 share_time。
+        校验项：
+        - wear_window 格式合理、两套不重叠、每套至少 30 分钟
+        - share_time 格式 HH:MM、落在对应 wear_window 内、不晚于 21:30（避免深夜昏暗时段）
         """
         try:
             for key in ("look_1", "look_2"):
@@ -340,7 +376,7 @@ class SmartShareScheduler:
                     )
                     return False
 
-            # 校验每个 wear_window 至少 30 分钟（太短的窗口无法随机选时）
+            # 校验每个 wear_window 至少 30 分钟（太短的窗口无法选时）
             for key in ("look_1", "look_2"):
                 wear_window = look_times[key]["wear_window"]
                 (sh, sm), (eh, em) = self._parse_window(wear_window)
@@ -350,14 +386,43 @@ class SmartShareScheduler:
                     logger.warning(f"[SmartShare] {key} wear_window {wear_window} 不足 30 分钟，无法选时")
                     return False
 
+            # 校验 share_time：格式、落在 wear_window 内、不晚于 21:30
+            for key in ("look_1", "look_2"):
+                look = look_times[key]
+                share_time = look.get("share_time", "")
+                parsed_st = self._parse_hhmm(share_time)
+                if not parsed_st:
+                    logger.warning(f"[SmartShare] {key} share_time 无效: {share_time}")
+                    return False
+                st_mins = parsed_st[0] * 60 + parsed_st[1]
+                # 不晚于 21:30（避免深夜昏暗光源时段）
+                if st_mins > 21 * 60 + 30:
+                    logger.warning(f"[SmartShare] {key} share_time {share_time} 晚于 21:30，可能光线昏暗")
+                    return False
+                # 必须在 wear_window 内
+                (sh, sm), (eh, em) = self._parse_window(look["wear_window"])
+                start_mins = sh * 60 + sm
+                end_mins = eh * 60 + em
+                if not (start_mins <= st_mins <= end_mins):
+                    logger.warning(
+                        f"[SmartShare] {key} share_time {share_time} 不在 wear_window {look['wear_window']} 内"
+                    )
+                    return False
+
             return True
         except Exception:
             return False
 
-    async def analyze_schedule(self, persona_name: str, dayflow_data: dict) -> Optional[dict]:
-        """调用 LLM 分析日程，返回两套穿搭的分享时间点"""
+    async def analyze_schedule(self, persona_name: str, dayflow_data: dict, existing_shares: list = None) -> Optional[dict]:
+        """调用 LLM 分析日程，返回两套穿搭的穿着时段与分享时间点
+
+        Args:
+            persona_name: 人格名
+            dayflow_data: dayflow 日程数据
+            existing_shares: 同 umo 下其他角色已选的分享时间 [(h, m), ...]，供 LLM 均匀分布参考
+        """
         provider_id = self._get_smart_provider_id(persona_name)
-        prompt = self._build_analyze_prompt(dayflow_data)
+        prompt = self._build_analyze_prompt(dayflow_data, existing_shares or [])
 
         logger.info(f"[SmartShare] 调用 LLM 分析日程 [{persona_name}], provider={provider_id or 'default'}")
 
@@ -386,7 +451,9 @@ class SmartShareScheduler:
         logger.info(
             f"[SmartShare] LLM 分析成功 [{persona_name}]: "
             f"look_1 wear_window={look_times['look_1'].get('wear_window','')}, "
-            f"look_2 wear_window={look_times['look_2'].get('wear_window','')}"
+            f"share_time={look_times['look_1'].get('share_time','')}; "
+            f"look_2 wear_window={look_times['look_2'].get('wear_window','')}, "
+            f"share_time={look_times['look_2'].get('share_time','')}"
         )
         return look_times
 
@@ -519,6 +586,62 @@ class SmartShareScheduler:
         chosen = random.choices(candidates, weights=weights, k=1)[0]
         return f"{chosen // 60:02d}:{chosen % 60:02d}"
 
+    # share_time 与冲突时间太近时的微调阈值（分钟）
+    # LLM 已基于其他角色 share_time 做均匀化，此阈值仅用于防御性微调，故小于 MIN_CROSS_PERSONA_GAP_MIN
+    SHARE_TIME_ADJUST_GAP_MIN = 60
+
+    def _adjust_share_time_for_conflict(
+        self, share_time: str, wear_window: str, conflict_times: list, min_gap: int = None
+    ) -> str:
+        """如果 share_time 与冲突时间太近，在 wear_window 内微调
+
+        LLM 已基于其他角色 share_time 做均匀分布，正常情况不冲突。
+        此方法仅做防御性微调：当 LLM 返回的 share_time 与冲突时间间隔 < min_gap 时，
+        以 share_time 为中心在 wear_window 内向两侧搜索最近的不冲突时间点。
+
+        Args:
+            share_time: LLM 返回的分享时间 HH:MM
+            wear_window: 穿搭时段 HH:MM-HH:MM
+            conflict_times: 冲突时间列表 [(h, m), ...]
+            min_gap: 最小间隔分钟数，默认 SHARE_TIME_ADJUST_GAP_MIN
+
+        Returns:
+            微调后的 HH:MM，或原 share_time（无冲突/无法微调时）
+        """
+        if min_gap is None:
+            min_gap = self.SHARE_TIME_ADJUST_GAP_MIN
+
+        parsed_st = self._parse_hhmm(share_time)
+        if not parsed_st:
+            return share_time
+        share_mins = parsed_st[0] * 60 + parsed_st[1]
+
+        conflict_mins = [ch * 60 + cm for (ch, cm) in conflict_times]
+
+        def has_conflict(t: int) -> bool:
+            return any(abs(t - c) < min_gap for c in conflict_mins)
+
+        # 无冲突，直接返回
+        if not has_conflict(share_mins):
+            return share_time
+
+        # 有冲突，在 wear_window 内以 share_time 为中心向两侧搜索
+        window = self._parse_window(wear_window)
+        if not window:
+            return share_time
+        (sh, sm), (eh, em) = window
+        start_mins = sh * 60 + sm
+        end_mins = eh * 60 + em
+
+        # 交替向前后搜索（步长 5 分钟），找最近的不冲突时间
+        for offset in range(5, (end_mins - start_mins) + 5, 5):
+            for t in (share_mins - offset, share_mins + offset):
+                if start_mins <= t <= end_mins and not has_conflict(t):
+                    return f"{t // 60:02d}:{t % 60:02d}"
+
+        # 无法在 wear_window 内找到不冲突时间，保持原 share_time
+        return share_time
+
     # ============ 任务注册 ============
 
     def _make_smart_task_wrapper(self, persona_name: str, look_key: str):
@@ -547,153 +670,165 @@ class SmartShareScheduler:
         return wrapper
 
     async def register_smart_jobs(self, persona_name: str, look_times: dict):
-        """用 LLM 输出的 wear_window 随机选时并注册 date 任务
+        """用 LLM 输出的 wear_window + share_time 注册 date 任务
 
         新流程：
-        1. LLM 只返回 wear_window，不返回 share_time
-        2. 在 wear_window 内随机选 share_time（合适时段轻微加权 + 避开同 umo 冲突）
-        3. 跨人格协调：通过 _registration_lock 串行化注册，
-           先注册的人格的时间点会加入冲突列表，后注册的人格自动避开
-        4. 复用 _make_smart_task_wrapper → _make_task_wrapper，execute_share 链路完全不变
+        1. LLM 返回 wear_window 和 share_time（基于早/开阔/明亮/均匀原则选择）
+        2. 代码对 share_time 做轻微微调：与同 umo 冲突时间太近时在 wear_window 内偏移
+        3. 跨人格协调：_registration_lock 由调用方 run_smart_schedule 持有，串行化确保
+           后注册者的 LLM 能看到先注册者的 share_time
+        4. fallback：LLM 未返回有效 share_time 时，用 _pick_random_time_in_window 随机选
 
-        注意：任务 ID 使用 _smart_share_ 前缀，与 cron 的 _smart_scheduler 区分，
-        防止清理旧任务时误删 cron。
+        注意：调用方需持有 _registration_lock。任务 ID 使用 _smart_share_ 前缀，
+        与 cron 的 _smart_scheduler 区分，防止清理旧任务时误删 cron。
         """
-        # 全局锁：串行化多人格注册，确保同 umo 下后注册者能看到先注册者的时间点
-        async with self._registration_lock:
-            now = datetime.now()
-            today_str = now.strftime("%Y-%m-%d")
+        now = datetime.now()
+        today_str = now.strftime("%Y-%m-%d")
 
-            # 清理旧的智能分享任务和随机任务
-            # 使用 _smart_share_ 前缀而非 _smart_，避免误删 smart_scheduler cron
-            # 同时清理 random_ 前缀：防止智能调度失败回退随机后，6 点 cron 成功导致两套任务并发重复分享
-            task_prefix = f"persona_{persona_name}_smart_share_"
-            random_prefix = f"persona_{persona_name}_random_"
-            for job in self.task_manager.scheduler.get_jobs():
-                if job.id.startswith(task_prefix) or job.id.startswith(random_prefix):
-                    self.task_manager.scheduler.remove_job(job.id)
+        # 清理旧的智能分享任务和随机任务
+        # 使用 _smart_share_ 前缀而非 _smart_，避免误删 smart_scheduler cron
+        # 同时清理 random_ 前缀：防止智能调度失败回退随机后，6 点 cron 成功导致两套任务并发重复分享
+        task_prefix = f"persona_{persona_name}_smart_share_"
+        random_prefix = f"persona_{persona_name}_random_"
+        for job in self.task_manager.scheduler.get_jobs():
+            if job.id.startswith(task_prefix) or job.id.startswith(random_prefix):
+                self.task_manager.scheduler.remove_job(job.id)
 
-            # 清理随机模式残留的延迟分享恢复任务和 state：
-            # 随机模式失败回退时会在 global_{persona} 写入 pending_delay_job（如 9:00），
-            # 若不清理，插件重载后 _recover_pending_jobs 会恢复出 9:00 的额外分享
-            resume_job_id = f"resume_auto_share_{persona_name}"
-            try:
-                if self.task_manager.scheduler.get_job(resume_job_id):
-                    self.task_manager.scheduler.remove_job(resume_job_id)
-            except Exception:
-                pass
-            try:
-                await self.db.update_state_dict(f"global_{persona_name}", {"pending_delay_job": None})
-            except Exception as e:
-                logger.warning(f"[SmartShare] [{persona_name}] 清理 global pending_delay_job 失败: {e}")
+        # 清理随机模式残留的延迟分享恢复任务和 state：
+        # 随机模式失败回退时会在 global_{persona} 写入 pending_delay_job（如 9:00），
+        # 若不清理，插件重载后 _recover_pending_jobs 会恢复出 9:00 的额外分享
+        resume_job_id = f"resume_auto_share_{persona_name}"
+        try:
+            if self.task_manager.scheduler.get_job(resume_job_id):
+                self.task_manager.scheduler.remove_job(resume_job_id)
+        except Exception:
+            pass
+        try:
+            await self.db.update_state_dict(f"global_{persona_name}", {"pending_delay_job": None})
+        except Exception as e:
+            logger.warning(f"[SmartShare] [{persona_name}] 清理 global pending_delay_job 失败: {e}")
 
-            # 收集同 umo 其他人格已注册的分享时间（冲突列表）
-            conflict_times = self._get_conflict_times_for_umo(persona_name)
-            if conflict_times:
-                logger.info(
-                    f"[SmartShare] [{persona_name}] 检测到同 umo 冲突时间: "
-                    f"{[f'{h:02d}:{m:02d}' for (h, m) in conflict_times]}"
+        # 收集同 umo 其他人格已注册的分享时间（冲突列表，用于微调防并发）
+        conflict_times = self._get_conflict_times_for_umo(persona_name)
+        if conflict_times:
+            logger.info(
+                f"[SmartShare] [{persona_name}] 检测到同 umo 冲突时间: "
+                f"{[f'{h:02d}:{m:02d}' for (h, m) in conflict_times]}"
+            )
+
+        # 为每套穿搭确定 share_time
+        picked_times = {}
+        for look_key in ("look_1", "look_2"):
+            look = look_times.get(look_key, {})
+            wear_window = look.get("wear_window", "")
+            llm_share_time = look.get("share_time", "")
+
+            # 优先使用 LLM 返回的 share_time，做微调防并发
+            if llm_share_time and self._parse_hhmm(llm_share_time):
+                share_time = self._adjust_share_time_for_conflict(
+                    llm_share_time, wear_window, conflict_times
                 )
-
-            # 为每套穿搭在 wear_window 内随机选时
-            picked_times = {}
-            for look_key in ("look_1", "look_2"):
-                look = look_times.get(look_key, {})
-                wear_window = look.get("wear_window", "")
-                # 把本人格前一套穿搭的已选时间也加入冲突，避免两套靠太近
+                if share_time != llm_share_time:
+                    logger.info(
+                        f"[SmartShare] [{persona_name}] {look_key} share_time 微调: "
+                        f"{llm_share_time} → {share_time}"
+                    )
+            else:
+                # fallback：LLM 未返回有效 share_time，在 wear_window 内随机选
                 share_time = self._pick_random_time_in_window(wear_window, conflict_times)
                 if not share_time:
-                    logger.warning(
-                        f"[SmartShare] [{persona_name}] {look_key} 在 wear_window={wear_window} 内选时失败"
-                    )
                     share_time = wear_window.split("-")[0] if wear_window else "12:00"
-                picked_times[look_key] = share_time
-                # 把本套时间加入冲突列表，供后续 look / 其他人格避让
-                parsed = self._parse_hhmm(share_time)
-                if parsed:
-                    conflict_times.append(parsed)
-                logger.info(
-                    f"[SmartShare] [{persona_name}] {look_key} 在 wear_window={wear_window} 内"
-                    f"随机选定 share_time={share_time}"
+                logger.warning(
+                    f"[SmartShare] [{persona_name}] {look_key} LLM share_time 无效，回退随机选时: {share_time}"
                 )
 
-            # 准备状态
-            state_key = self._get_state_key(persona_name)
-            state = {
-                "date": today_str,
-                "look_1": {
-                    "share_time": picked_times["look_1"],
-                    "wear_window": look_times["look_1"].get("wear_window", ""),
-                    "executed": False
-                },
-                "look_2": {
-                    "share_time": picked_times["look_2"],
-                    "wear_window": look_times["look_2"].get("wear_window", ""),
-                    "executed": False
-                }
+            picked_times[look_key] = share_time
+            # 把本套时间加入冲突列表，供后续 look / 其他人格避让
+            parsed = self._parse_hhmm(share_time)
+            if parsed:
+                conflict_times.append(parsed)
+            logger.info(
+                f"[SmartShare] [{persona_name}] {look_key} 选定 share_time={share_time}"
+                f"（穿搭时段: {wear_window}）"
+            )
+
+        # 准备状态
+        state_key = self._get_state_key(persona_name)
+        state = {
+            "date": today_str,
+            "look_1": {
+                "share_time": picked_times["look_1"],
+                "wear_window": look_times["look_1"].get("wear_window", ""),
+                "executed": False
+            },
+            "look_2": {
+                "share_time": picked_times["look_2"],
+                "wear_window": look_times["look_2"].get("wear_window", ""),
+                "executed": False
             }
+        }
 
-            # 注册任务
-            for idx, look_key in enumerate(["look_1", "look_2"]):
-                share_time = picked_times[look_key]
-                wear_window = look_times[look_key].get("wear_window", "")
+        # 注册任务
+        for idx, look_key in enumerate(["look_1", "look_2"]):
+            share_time = picked_times[look_key]
+            wear_window = look_times[look_key].get("wear_window", "")
 
-                parsed = self._parse_hhmm(share_time)
-                if not parsed:
+            parsed = self._parse_hhmm(share_time)
+            if not parsed:
+                continue
+            h, m = parsed
+
+            run_time = now.replace(hour=h, minute=m, second=0, microsecond=0)
+
+            # 时间点已过：检查是否仍在穿搭时段内
+            if run_time <= now:
+                in_window = False
+                if wear_window:
+                    window = self._parse_window(wear_window)
+                    if window:
+                        (sh, sm), (eh, em) = window
+                        start_dt = now.replace(hour=sh, minute=sm, second=0, microsecond=0)
+                        end_dt = now.replace(hour=eh, minute=em, second=59, microsecond=0)
+                        if start_dt <= now <= end_dt:
+                            in_window = True
+
+                if in_window:
+                    # 仍在穿搭时段内，立即补偿触发
+                    run_time = now + timedelta(seconds=10)
+                    logger.info(
+                        f"[SmartShare] [{persona_name}] {look_key} 时间点 {share_time} 已过但在穿搭时段内，补偿触发"
+                    )
+                else:
+                    # 已超出穿搭时段，跳过（避免画错穿搭）
+                    logger.info(
+                        f"[SmartShare] [{persona_name}] {look_key} 时间点 {share_time} 已过且超出穿搭时段，跳过"
+                    )
+                    state[look_key]["executed"] = True
+                    state[look_key]["skipped"] = True
                     continue
-                h, m = parsed
 
-                run_time = now.replace(hour=h, minute=m, second=0, microsecond=0)
+            job_id = f"{task_prefix}{idx}"
+            self.task_manager.scheduler.add_job(
+                self._make_smart_task_wrapper(persona_name, look_key),
+                'date',
+                run_date=run_time,
+                id=job_id,
+                replace_existing=True
+            )
+            logger.info(
+                f"[SmartShare] [{persona_name}] {look_key} 已安排在 {run_time.strftime('%H:%M:%S')} 执行"
+                f"（穿搭时段: {wear_window}）"
+            )
 
-                # 时间点已过：检查是否仍在穿搭时段内
-                if run_time <= now:
-                    in_window = False
-                    if wear_window:
-                        window = self._parse_window(wear_window)
-                        if window:
-                            (sh, sm), (eh, em) = window
-                            start_dt = now.replace(hour=sh, minute=sm, second=0, microsecond=0)
-                            end_dt = now.replace(hour=eh, minute=em, second=59, microsecond=0)
-                            if start_dt <= now <= end_dt:
-                                in_window = True
+        # 保存状态
+        await self.db.update_state_dict(state_key, state)
 
-                    if in_window:
-                        # 仍在穿搭时段内，立即补偿触发
-                        run_time = now + timedelta(seconds=10)
-                        logger.info(
-                            f"[SmartShare] [{persona_name}] {look_key} 时间点 {share_time} 已过但在穿搭时段内，补偿触发"
-                        )
-                    else:
-                        # 已超出穿搭时段，跳过（避免画错穿搭）
-                        logger.info(
-                            f"[SmartShare] [{persona_name}] {look_key} 时间点 {share_time} 已过且超出穿搭时段，跳过"
-                        )
-                        state[look_key]["executed"] = True
-                        state[look_key]["skipped"] = True
-                        continue
-
-                job_id = f"{task_prefix}{idx}"
-                self.task_manager.scheduler.add_job(
-                    self._make_smart_task_wrapper(persona_name, look_key),
-                    'date',
-                    run_date=run_time,
-                    id=job_id,
-                    replace_existing=True
-                )
-                logger.info(
-                    f"[SmartShare] [{persona_name}] {look_key} 已安排在 {run_time.strftime('%H:%M:%S')} 执行"
-                    f"（穿搭时段: {wear_window}）"
-                )
-
-            # 保存状态
-            await self.db.update_state_dict(state_key, state)
-
-            # 防御性检查：确保 cron 未被误删（register_smart_jobs 清理由 _smart_share_ 前缀保护，
-            # 但以防其他路径意外移除，注册完任务后验证 cron 是否存活）
-            scheduler_jid = f"persona_{persona_name}_smart_scheduler"
-            if not self.task_manager.scheduler.get_job(scheduler_jid):
-                logger.warning(f"[SmartShare] [{persona_name}] cron 意外丢失，自动重新注册")
-                self.setup_smart_cron(persona_name)
+        # 防御性检查：确保 cron 未被误删（register_smart_jobs 清理由 _smart_share_ 前缀保护，
+        # 但以防其他路径意外移除，注册完任务后验证 cron 是否存活）
+        scheduler_jid = f"persona_{persona_name}_smart_scheduler"
+        if not self.task_manager.scheduler.get_job(scheduler_jid):
+            logger.warning(f"[SmartShare] [{persona_name}] cron 意外丢失，自动重新注册")
+            self.setup_smart_cron(persona_name)
 
     # ============ 主入口 ============
 
@@ -703,9 +838,12 @@ class SmartShareScheduler:
         失败场景（dayflow 未就绪 / LLM 超时 / 解析失败）返回 False，
         由调用方决定是否回退到原 random_periods 随机机制。
 
-        并发保护：通过 _running_personas 防止 6 点 cron 与 _smart_init_today
-        并发执行（如插件在 5:50 重载，_smart_init_today 立即触发并等待 dayflow，
-        6 点 cron 又触发）。返回 True 表示"已处理/正在处理"，不触发回退。
+        并发保护：
+        - _running_personas 防止同一 persona 的 6 点 cron 与 _smart_init_today 并发
+        - _registration_lock 串行化多人格的 LLM 分析+注册，让后注册者能看到先注册者的
+          share_time，从而实现均匀分布。dayflow 就绪检查在锁外并行，不阻塞其他 persona
+
+        返回 True 表示"已处理/正在处理"，不触发回退。
         """
         if self.plugin._is_terminated:
             return False
@@ -719,20 +857,28 @@ class SmartShareScheduler:
         try:
             logger.info(f"[SmartShare] 开始智能调度 [{persona_name}]")
 
-            # 1. 确保 dayflow 日程就绪
+            # 1. 确保 dayflow 日程就绪（锁外并行，可能耗时较长）
             dayflow_data = await self.ensure_dayflow_ready(persona_name)
             if not dayflow_data:
                 logger.warning(f"[SmartShare] dayflow 日程未就绪 [{persona_name}]")
                 return False
 
-            # 2. 调用 LLM 分析日程
-            look_times = await self.analyze_schedule(persona_name, dayflow_data)
-            if not look_times:
-                logger.warning(f"[SmartShare] LLM 分析失败 [{persona_name}]")
-                return False
+            # 2. LLM 分析 + 注册（锁内串行，让后注册者看到先注册者的 share_time）
+            async with self._registration_lock:
+                # 收集同 umo 已注册角色的分享时间，供 LLM 均匀分布参考
+                existing_shares = self._get_conflict_times_for_umo(persona_name)
+                if existing_shares:
+                    logger.info(
+                        f"[SmartShare] [{persona_name}] 已有其他角色分享时间: "
+                        f"{[f'{h:02d}:{m:02d}' for (h, m) in existing_shares]}"
+                    )
 
-            # 3. 注册任务
-            await self.register_smart_jobs(persona_name, look_times)
+                look_times = await self.analyze_schedule(persona_name, dayflow_data, existing_shares)
+                if not look_times:
+                    logger.warning(f"[SmartShare] LLM 分析失败 [{persona_name}]")
+                    return False
+
+                await self.register_smart_jobs(persona_name, look_times)
 
             logger.info(f"[SmartShare] 智能调度成功 [{persona_name}]")
             return True
