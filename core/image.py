@@ -76,9 +76,9 @@ class ImageService:
 
     # ==================== 1. 核心逻辑：Agent 提取 ====================
 
-    async def _agent_extract_visuals(self, content: str, life_context: str, persona_name: str = None) -> Optional[str]:
-        if not content and not life_context: return None
-
+    def _build_visual_system_prompt(self) -> str:
+        """构建视觉导演 system_prompt，复用配置或默认模板。
+        首次配图与敏感重试均调用此方法，保证格式要求一致。"""
         now = datetime.now()
         curr_hour = now.hour
         curr_time = f"{now.hour:02d}:{now.minute:02d}"
@@ -110,6 +110,15 @@ class ImageService:
             if self.debug_mode:
                 logger.info("[DailySharing] 视觉导演使用默认提示词模板")
             system_prompt = self._get_default_visual_director_prompt(logic_prompt, curr_time)
+
+        return system_prompt
+
+    async def _agent_extract_visuals(self, content: str, life_context: str, persona_name: str = None) -> Optional[str]:
+        if not content and not life_context: return None
+
+        curr_time = f"{datetime.now().hour:02d}:{datetime.now().minute:02d}"
+
+        system_prompt = self._build_visual_system_prompt()
 
         user_prompt = f"【分享文案】：{content}\n【生活日程】：{life_context}\n\n请生成绘画提示词："
 
@@ -196,26 +205,32 @@ class ImageService:
         current_prompt = prompt
 
         for attempt in range(1 + max_sensitive_retries):
-            result, is_sensitive = await self._call_aiimg_selfie(current_prompt, persona_name=persona_name)
+            result, sensitive_type = await self._call_aiimg_selfie(current_prompt, persona_name=persona_name)
 
             if result:
                 self._last_image_description = current_prompt
                 return result
 
-            if not is_sensitive:
+            if not sensitive_type:
+                # 非敏感错误，直接放弃
                 self._last_image_description = None
                 return None
 
             if attempt < max_sensitive_retries:
-                logger.warning(f"[DailySharing] 配图因敏感内容被拦截 (第{attempt+1}次)，正在重新生成提示词...")
-                current_prompt = await self._regenerate_prompt_avoiding_sensitive(
-                    content, life_context, current_prompt, persona_name
-                )
-                if not current_prompt:
-                    logger.warning("[DailySharing] 重新生成提示词失败，放弃配图")
-                    self._last_image_description = None
-                    return None
-                logger.info(f"[DailySharing] 重试配图 Prompt: {current_prompt[:80]}...")
+                if sensitive_type == "image":
+                    # 输入图片敏感：参考图本身被判定敏感，换提示词无用，直接用原文重试
+                    logger.warning(f"[DailySharing] 输入图片敏感(第{attempt+1}次)，直接用原提示词重试...")
+                else:
+                    # 输入文本敏感：提示词触发敏感，调用 LLM 降低敏感度重新生成
+                    logger.warning(f"[DailySharing] 输入文本敏感(第{attempt+1}次)，重新生成提示词降敏感度...")
+                    current_prompt = await self._regenerate_prompt_avoiding_sensitive(
+                        content, life_context, current_prompt, persona_name
+                    )
+                    if not current_prompt:
+                        logger.warning("[DailySharing] 重新生成提示词失败，放弃配图")
+                        self._last_image_description = None
+                        return None
+                    logger.info(f"[DailySharing] 重试配图 Prompt: {current_prompt[:80]}...")
             else:
                 logger.warning(f"[DailySharing] 配图因敏感内容被拦截，已重试{max_sensitive_retries}次，放弃配图仅发送文案")
                 self._last_image_description = None
@@ -394,30 +409,25 @@ class ImageService:
         self, content: str, life_context: str,
         old_prompt: str, persona_name: str = None
     ) -> Optional[str]:
+        # 复用主提示词作为 system_prompt，保证格式要求（开头/结尾/要素）与首次配图一致
+        system_prompt = self._build_visual_system_prompt()
+
         retry_prompt = (
             "你之前为以下内容生成的配图提示词被图片生成服务的安全策略拦截了，"
             "可能是因为描述中包含了过于暴露的服装、暗示性姿势、或其他敏感元素。\n\n"
             f"原提示词：{old_prompt}\n\n"
-            "请重新为这段分享内容设计配图描述，务必遵守以下规则：\n"
-            "1. 穿搭描述必须保守、日常，禁止低胸、超短、透视、紧身等暗示性服装\n"
-            "2. 动作必须自然大方，禁止任何暗示性姿势\n"
-            "3. 构图以中景、远景为主，避免特写敏感部位\n"
-            "4. 整体氛围健康积极\n\n"
-            f"分享内容：{content}\n"
+            "请重新生成，务必降低敏感度：穿搭保守日常、动作自然大方、避免特写敏感部位。"
         )
+        if content:
+            retry_prompt += f"\n\n分享内容：{content}"
         if life_context:
-            retry_prompt += f"\n生活上下文：{life_context}\n"
+            retry_prompt += f"\n生活上下文：{life_context}"
 
-        retry_prompt += (
-            "\n输出要求与视觉导演提示词相同：一段连贯的自然语言段落，"
-            "以\"以前三张参考图中同一少女为基准，完整保留少女五官、身材等全部人体身份特征，绝对禁止任何拼图，为少女生成一张新的写真：她有着白皙细腻的皮肤，纤细的身姿与格外饱满的曲线形成鲜明对比，\"开头，"
-            "以\"完全保留少女的面部特征与丰满的身材。\"结尾。"
-            "禁止输出 JSON 或任何格式标记。"
-        )
+        retry_prompt += "\n\n请直接输出降低敏感度后的配图提示词。"
 
         result = await self.call_llm(
             retry_prompt,
-            system_prompt="你是一个专业的配图导演。你的任务是为分享内容设计安全、健康的配图描述。之前的设计因敏感内容被拦截，你必须大幅降低敏感度。输出一段连贯的自然语言段落，不要输出 JSON。",
+            system_prompt=system_prompt,
             persona_name=persona_name,
         )
 
@@ -434,7 +444,7 @@ class ImageService:
         self._ensure_plugin()
         if not self._aiimg_plugin:
             logger.error("[DailySharing] 未找到AI图像插件，请确保已安装 astrbot_plugin_aiimg")
-            return None, False
+            return None, None
 
         aiimg = self._aiimg_plugin
 
@@ -442,7 +452,7 @@ class ImageService:
             resolved_persona = persona_name or await self._get_default_persona_name()
             if not resolved_persona:
                 logger.error("[DailySharing] 未获取到默认人格名称，无法使用自拍功能。请在 AstrBot 中配置默认人格。")
-                return None, False
+                return None, None
 
             logger.info(f"[DailySharing] 使用自拍模式，人格: {resolved_persona}")
 
@@ -455,16 +465,16 @@ class ImageService:
 
             if not ref_paths:
                 logger.error(f"[DailySharing] 人格「{resolved_persona}」未配置自拍参考照。请在 aiimg 插件的 WebUI 中为该人格配置参考图。")
-                return None, False
+                return None, None
 
             if not hasattr(aiimg, "_read_paths_bytes") or not hasattr(aiimg, "edit"):
                 logger.error("[DailySharing] aiimg 插件版本不支持自拍功能所需接口")
-                return None, False
+                return None, None
 
             ref_images = await aiimg._read_paths_bytes(ref_paths)
             if not ref_images:
                 logger.error(f"[DailySharing] 人格「{resolved_persona}」的参考图文件读取失败")
-                return None, False
+                return None, None
 
             logger.info(f"[DailySharing] 获取到 {len(ref_images)} 张参考图")
 
@@ -474,7 +484,7 @@ class ImageService:
 
             if not chain_override:
                 logger.error(f"[DailySharing] 人格「{resolved_persona}」未配置自拍服务商链路。请在 aiimg 插件的 WebUI 中为该人格配置 chain。")
-                return None, False
+                return None, None
 
             persona_default_output = ""
             if hasattr(aiimg, "_get_persona_selfie_config"):
@@ -507,22 +517,41 @@ class ImageService:
 
             if path_obj is None:
                 logger.error("[DailySharing] aiimg.edit.edit() 返回 None，自拍生成失败")
-                return None, False
-            return str(path_obj), False
+                return None, None
+            return str(path_obj), None
 
         except Exception as e:
             err_str = str(e).lower()
-            is_sensitive = any(kw in err_str for kw in [
+            # 区分输入图片敏感 vs 输入文本敏感
+            # InputImageSensitiveContentDetected：参考图本身被判定敏感，换提示词无用，直接原文重试
+            # InputTextSensitiveContentDetected：提示词文本触发敏感，需要降敏感度重新生成
+            is_image_sensitive = any(kw in err_str for kw in [
+                "inputimagesensitivecontentdetected", "inputimagesensitive",
+                "input_image_sensitive", "imagesensitive",
+            ])
+            is_text_sensitive = any(kw in err_str for kw in [
+                "inputtextsensitivecontentdetected", "inputtextsensitive",
+                "input_text_sensitive", "textsensitive",
+            ])
+            is_general_sensitive = any(kw in err_str for kw in [
                 "sensitivecontent", "sensitive_content", "sensitive information",
                 "contentpolicy", "content_policy", "safety", "prohibited",
                 "nsfw", "inappropriate",
             ])
-            if is_sensitive:
-                logger.warning(f"[DailySharing] 自拍生成因敏感内容被拦截: {e}")
-                return None, True
+
+            if is_image_sensitive:
+                logger.warning(f"[DailySharing] 自拍生成因输入图片敏感被拦截: {e}")
+                return None, "image"
+            elif is_text_sensitive:
+                logger.warning(f"[DailySharing] 自拍生成因输入文本敏感被拦截: {e}")
+                return None, "text"
+            elif is_general_sensitive:
+                # 通用敏感，无法区分来源，按文本敏感处理（降敏感度重试）
+                logger.warning(f"[DailySharing] 自拍生成因敏感内容被拦截(类型未知，按文本敏感处理): {e}")
+                return None, "text"
             else:
                 logger.error(f"[DailySharing] 自拍生成出错: {e}")
-                return None, False
+                return None, None
 
     async def _auto_save_to_wardrobe(self, image_path, persona_name: str = "", prompt: str = ""):
         wardrobe = self._get_wardrobe_instance()
