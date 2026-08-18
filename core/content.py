@@ -1337,6 +1337,16 @@ class ContentService:
         query = self._get_topic_search_prompt(persona_name, candidate_count)
         self._debug_log(f"即将调用 grok._do_search (query长度={len(query)})")
 
+        # 超时与 grok 插件侧配置的 timeout_seconds 统一（下限 300s），
+        # 避免 grok 还在内部重试时被外层 90s 提前掐断
+        try:
+            grok_timeout = int(grok_plugin.config.get("timeout_seconds", 300) or 300)
+        except Exception:
+            grok_timeout = 300
+        if grok_timeout < 300:
+            grok_timeout = 300
+        self._debug_log(f"grok 搜索外部等待超时设为 {grok_timeout}s (grok 插件 timeout_seconds={grok_timeout})")
+
         # 用 create_task + 显式超时 + 取消：wait_for 在主循环被同步阻塞时无法触发超时回调，
         # create_task 把协程包成 Task 后，loop.stop() 或外部调度仍可强制取消。
         search_task = asyncio.create_task(
@@ -1348,9 +1358,9 @@ class ContentService:
             )
         )
         try:
-            result = await asyncio.wait_for(search_task, timeout=90)
+            result = await asyncio.wait_for(search_task, timeout=grok_timeout)
         except asyncio.TimeoutError:
-            self._debug_log("grok 搜索超时(90s)，强制取消任务，跳过本次话题分享", level="ERROR")
+            self._debug_log(f"grok 搜索超时({grok_timeout}s)，强制取消任务，跳过本次话题分享", level="ERROR")
             search_task.cancel()
             return []
         except Exception as e:
@@ -1468,10 +1478,10 @@ class ContentService:
                     persona_name=ctx.get('persona_name'),
                     provider_id=provider_id,
                 ),
-                timeout=90,
+                timeout=300,
             )
         except asyncio.TimeoutError:
-            logger.error("[内容服务] 话题策略 LLM 调用超时（90秒），跳过本次话题分享")
+            logger.error("[内容服务] 话题策略 LLM 调用超时（300秒），跳过本次话题分享")
             return None
         except Exception as e:
             logger.error(f"[内容服务] 话题策略 LLM 调用异常: {e}")

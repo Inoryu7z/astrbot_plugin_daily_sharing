@@ -246,6 +246,12 @@
                 "default": true,
                 "hint": "使用多模态模型分析图片内容，生成针对性的视频提示词（需要配置支持识图的LLM）"
               },
+              "enable_image_with_video": {
+                "description": "同时发送配图（选中视频时额外发送原图）",
+                "type": "bool",
+                "default": false,
+                "hint": "默认关闭：生成视频时只发送视频。开启后，视频与配图都会发送"
+              },
               "video_llm_provider_id": {
                 "description": "视频识图LLM提供商",
                 "type": "string",

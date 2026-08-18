@@ -2010,6 +2010,7 @@ class TaskManager:
         # 3. 分享视觉媒体（视频优先，其次图片）
         if video_url:
             max_video_retries = 2
+            video_sent = False
             for video_attempt in range(max_video_retries):
                 try:
                     video_chain = MessageChain()
@@ -2018,6 +2019,7 @@ class TaskManager:
                     else:
                         video_chain.chain.append(Video.fromFileSystem(video_url))
                     await self.plugin.context.send_message(uid, video_chain)
+                    video_sent = True
                     break
                 except Exception as e:
                     err_repr = repr(e).lower()
@@ -2030,6 +2032,7 @@ class TaskManager:
                     )
                     if is_timeout_likely_sent:
                         logger.warning(f"[DailySharing] 发送视频给 {uid} 遇到超时错误，消息可能已送达，不再重试: {e}")
+                        video_sent = True
                         break
                     if video_attempt < max_video_retries - 1:
                         wait_sec = 3 * (video_attempt + 1)
@@ -2037,6 +2040,22 @@ class TaskManager:
                         await asyncio.sleep(wait_sec)
                     else:
                         logger.error(f"[DailySharing] 发送视频给 {uid} 失败 (已重试{max_video_retries}次): {e}")
+
+            # 开启「同时发送配图」开关时，视频发送后额外发送原图
+            send_img_with_video = self.plugin.get_persona_config_value(
+                persona_name, "persona_image_conf", "enable_image_with_video", False
+            )
+            if send_img_with_video and video_sent and img_path:
+                try:
+                    await self.random_sleep(persona_name=persona_name)
+                    img_chain = MessageChain()
+                    if img_path.startswith("http"):
+                        img_chain.url_image(img_path)
+                    else:
+                        img_chain.file_image(img_path)
+                    await self.plugin.context.send_message(uid, img_chain)
+                except Exception as e:
+                    logger.error(f"[DailySharing] 发送视频附带的图片给 {uid} 失败: {e}")
         elif img_path:
             img_not_sent_yet = separate_img or audio_path or not should_send_text or not clean_text
             if img_not_sent_yet:
