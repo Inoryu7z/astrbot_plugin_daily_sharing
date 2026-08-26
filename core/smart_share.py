@@ -21,7 +21,7 @@ from astrbot.api import logger
 
 SMART_SHARE_SYSTEM_PROMPT = "你是专业的日程分析助手，只输出 JSON 对象，不要任何解释或代码块标记。"
 
-SMART_SHARE_USER_PROMPT_TEMPLATE = """你是穿搭时段识别与分享时间选择助手。基于以下当日日程，识别两套穿搭各自的穿着时段，并为每套穿搭选择一个最佳分享时间点。
+SMART_SHARE_USER_PROMPT_TEMPLATE = """你是穿搭时段识别与分享时间选择助手。基于以下当日日程，识别各套穿搭各自的穿着时段，并为每套穿搭选择一个最佳分享时间点。
 
 ## 当日日程
 {schedule_text}
@@ -31,23 +31,23 @@ SMART_SHARE_USER_PROMPT_TEMPLATE = """你是穿搭时段识别与分享时间选
 - **第二套（look_2）**：午后换装的装扮，是正装更换，**换装时间一般不晚于18点**
 - **睡衣/睡袍不算换装**：深夜回家换上睡衣只是"换睡衣"，不是正装更换，不能把睡衣时段当作 look_2 的穿着时段
 - 如果当日午后有正装换装，look_2 的 wear_window 从换装完成到当日最后活动结束（换睡衣前）；如果当日没有午后正装换装，look_2 的 wear_window 结束于晚间活动结束，不要把睡衣时段算进去
+{night_look_definition}
 
 ## 任务
-1. 从日程和穿搭描述中识别两套穿搭（晨间第一套 和 午后第二套）的穿着时段
-2. 给出每套穿搭的 wear_window（穿着时段，格式 HH:MM-HH:MM）
-3. 为每套穿搭选择一个 share_time（分享时间点，格式 HH:MM），必须在对应 wear_window 内
+{task_looks_hint}
 
 ## wear_window 规则
 - 必须是当天实际穿着该套穿搭的连续时段
 - 起始时间 = 该套穿搭换装完成时间
 - 结束时间 = 该套穿搭被换下时间（或当日最后活动结束时间）
 - 不能跨日（如 22:00-02:00 应改写为 22:00-23:59）
-- 第一套 wear_window 的结束时间应 ≤ 第二套 wear_window 的起始时间
+- 各套穿搭按穿着时间先后衔接：前一套 wear_window 的结束时间应 ≤ 后一套 wear_window 的起始时间
+{wear_window_night_rule}
 
 ## share_time 选择原则
 1. **早**：在 wear_window 内尽量偏早。例：wear_window 为 07:00-15:00，share_time 选 09:00 左右而非 14:00
 2. **开阔**：优先选角色活动在"住处外"的时段（操场、舞蹈室、街道、咖啡馆等非住处场景），避免选角色在卧室/卫生间的时段
-3. **明亮**：分享时间不要太晚，避免依赖室内昏暗光源照明的时段（如深夜仅开台灯/夜灯的时段），优先选自然光充足或室内照明明亮的时段
+3. **明亮**：分享时间不要太晚，避免依赖室内昏暗光源照明的时段（如深夜仅开台灯/夜灯的时段），优先选自然光充足或室内照明明亮的时段。夜间居家装是例外，可放宽该限制，选择居家场景下光线相对舒适的时段
 4. **均匀**：{uniform_hint}
 
 ## 输出 JSON
@@ -63,6 +63,7 @@ SMART_SHARE_USER_PROMPT_TEMPLATE = """你是穿搭时段识别与分享时间选
     "share_time": "15:00",
     "reason": "午后换装后到晚间活动结束。15:00 在舞蹈室，光线明亮且非住处"
   }}
+  {night_look_json}
 }}"""
 
 
@@ -116,6 +117,12 @@ class SmartShareScheduler:
     def _get_fallback_to_random(self, persona_name: str) -> bool:
         return bool(self.plugin.get_persona_config_value(
             persona_name, "persona_smart_share_conf", "smart_share_fallback_to_random", True
+        ))
+
+    def _is_night_look_enabled(self, persona_name: str) -> bool:
+        """是否开启夜间居家装（第三套）三次分享——由 dayflow 新版 night_look + 本开关共同决定"""
+        return bool(self.plugin.get_persona_config_value(
+            persona_name, "persona_smart_share_conf", "smart_share_night_look", False
         ))
 
     def _get_state_key(self, persona_name: str) -> str:
@@ -268,25 +275,64 @@ class SmartShareScheduler:
 
         return "\n\n".join(parts)
 
-    def _build_analyze_prompt(self, dayflow_data: dict, existing_shares: list = None) -> str:
+    def _build_analyze_prompt(self, dayflow_data: dict, existing_shares: list = None, night_look_enabled: bool = False, persona_name: str = None) -> str:
         """构建 LLM 分析提示词
 
         Args:
             dayflow_data: dayflow 日程数据
             existing_shares: 同 umo 下其他角色已选的分享时间 [(h, m), ...]，供 LLM 均匀分布参考
+            night_look_enabled: 是否开启夜间居家装（第三套）三次分享
+            persona_name: 人格名，用于日志
         """
         schedule_text = self._build_schedule_text(dayflow_data)
         if existing_shares:
             times_str = "、".join(f"{h:02d}:{m:02d}" for (h, m) in existing_shares)
             uniform_hint = (
-                f"已知其他角色分享时间为 [{times_str}]，请让你的两个 share_time 与这些时间点"
+                f"已知其他角色分享时间为 [{times_str}]，请让你的各套 share_time 与这些时间点"
                 f"在时间轴上均匀分布，避免扎堆"
             )
         else:
             uniform_hint = "当日暂无其他角色分享时间参考，按早/开阔/明亮原则选择即可"
+
+        if night_look_enabled:
+            night_look_definition = (
+                "- **第三套（look_3，夜间居家装）**：晚间回到住处、沐浴后换上的居家/睡前造型，穿着到睡前。"
+                "若当日日程中无明确的夜间居家装换装（仅换睡衣），则忽略第三套，只输出前两套"
+            )
+            task_looks_hint = (
+                "1. 从日程和穿搭描述中识别各套穿搭的穿着时段：晨间第一套、午后第二套；"
+                "若当日含明确的夜间居家装（第三套），则一并识别其穿着时段\n"
+                "2. 给出每套已识别穿搭的 wear_window（穿着时段，格式 HH:MM-HH:MM）\n"
+                "3. 为每套穿搭选择一个 share_time（分享时间点，格式 HH:MM），必须在对应 wear_window 内"
+            )
+            wear_window_night_rule = (
+                "- 第三套（夜间居家装）的 wear_window：从沐浴换上夜间居家装开始，到睡前结束；若跨夜则改写为 23:59"
+            )
+            night_look_json = (
+                ',\n'
+                '  "look_3": {\n'
+                '    "wear_window": "22:30-23:59",\n'
+                '    "share_time": "23:00",\n'
+                '    "reason": "夜间居家装，沐浴后到睡前，居家场景光线柔和"\n'
+                '  }'
+            )
+        else:
+            night_look_definition = ""
+            task_looks_hint = (
+                "1. 从日程和穿搭描述中识别两套穿搭（晨间第一套 和 午后第二套）的穿着时段\n"
+                "2. 给出每套穿搭的 wear_window（穿着时段，格式 HH:MM-HH:MM）\n"
+                "3. 为每套穿搭选择一个 share_time（分享时间点，格式 HH:MM），必须在对应 wear_window 内"
+            )
+            wear_window_night_rule = ""
+            night_look_json = ""
+
         return SMART_SHARE_USER_PROMPT_TEMPLATE.format(
             schedule_text=schedule_text,
-            uniform_hint=uniform_hint
+            uniform_hint=uniform_hint,
+            night_look_definition=night_look_definition,
+            task_looks_hint=task_looks_hint,
+            wear_window_night_rule=wear_window_night_rule,
+            night_look_json=night_look_json,
         )
 
     def _parse_llm_response(self, response: str) -> Optional[dict]:
@@ -310,12 +356,18 @@ class SmartShareScheduler:
         try:
             data = json.loads(text[start:end + 1])
             if "look_1" in data and "look_2" in data:
-                # 校验每套穿搭都含 share_time 字段
+                # 校验前两套都含 share_time 字段
                 for key in ("look_1", "look_2"):
                     look = data.get(key, {})
                     if not isinstance(look, dict) or not look.get("share_time"):
                         logger.warning(f"[SmartShare] {key} 缺少 share_time 字段: {look}")
                         return None
+                # 第三套（夜间居家装）为可选：存在则必须含 share_time，不存在则优雅降级
+                look_3 = data.get("look_3")
+                if look_3 is not None:
+                    if not isinstance(look_3, dict) or not look_3.get("share_time"):
+                        logger.info(f"[SmartShare] look_3 缺少 share_time 字段，忽略第三套: {look_3}")
+                        data.pop("look_3", None)
                 return data
         except Exception:
             pass
@@ -347,23 +399,44 @@ class SmartShareScheduler:
         """验证 LLM 输出的 wear_window 和 share_time 是否合理
 
         校验项：
-        - wear_window 格式合理、两套不重叠、每套至少 30 分钟
-        - share_time 格式 HH:MM、落在对应 wear_window 内、不晚于 21:30（避免深夜昏暗时段）
+        - wear_window 格式合理、相邻套不重叠、每套至少 30 分钟
+        - share_time 格式 HH:MM、落在对应 wear_window 内、不晚于限制时间（前两套 21:30，第三套可放宽到 23:30）
+        - 第三套（look_3）为可选，缺失时优雅降级只校验前两套
+
+        Returns:
+            bool: 校验通过返回 True；若调用方需要更新后的 look_times（如第三套被剔除），调用方应重新读取
         """
+        # 动态收集实际存在的 look：look_1/look_2 必选，look_3 可选
+        present_keys = [k for k in ("look_1", "look_2") if look_times.get(k) is not None]
+        if "look_3" in look_times and look_times.get("look_3") is not None:
+            present_keys.append("look_3")
+        if len(present_keys) < 2:
+            return False
+
         try:
-            for key in ("look_1", "look_2"):
+            # 每套的 wear_window 格式与最少 30 分钟
+            for key in present_keys:
                 look = look_times.get(key)
                 if not isinstance(look, dict):
                     return False
                 wear_window = look.get("wear_window", "")
-                if not wear_window or not self._parse_window(wear_window):
+                parsed_w = self._parse_window(wear_window)
+                if not parsed_w:
                     logger.warning(f"[SmartShare] {key} wear_window 无效: {wear_window}")
                     return False
+                (sh, sm), (eh, em) = parsed_w
+                if (eh * 60 + em) - (sh * 60 + sm) < 30:
+                    logger.warning(f"[SmartShare] {key} wear_window {wear_window} 不足 30 分钟，无法选时")
+                    return False
 
-            # 校验 look_1 的 wear_window 结束时间 ≤ look_2 的起始时间（不重叠）
-            w1 = self._parse_window(look_times["look_1"]["wear_window"])
-            w2 = self._parse_window(look_times["look_2"]["wear_window"])
-            if w1 and w2:
+            # 相邻套 wear_window 不重叠（按穿着先后：look_1 → look_2 → look_3）
+            for i in range(len(present_keys) - 1):
+                left_key = present_keys[i]
+                right_key = present_keys[i + 1]
+                w1 = self._parse_window(look_times[left_key]["wear_window"])
+                w2 = self._parse_window(look_times[right_key]["wear_window"])
+                if not w1 or not w2:
+                    return False
                 (_, _), (e1h, e1m) = w1
                 (s2h, s2m), _ = w2
                 end1_mins = e1h * 60 + e1m
@@ -371,23 +444,13 @@ class SmartShareScheduler:
                 # 允许 5 分钟容差（LLM 可能输出 13:30-13:30 这种边界）
                 if end1_mins > start2_mins + 5:
                     logger.warning(
-                        f"[SmartShare] look_1 wear_window 结束({look_times['look_1']['wear_window'].split('-')[1]})"
-                        f" 晚于 look_2 起始({look_times['look_2']['wear_window'].split('-')[0]})，存在重叠"
+                        f"[SmartShare] {left_key} wear_window 结束({look_times[left_key]['wear_window'].split('-')[1]})"
+                        f" 晚于 {right_key} 起始({look_times[right_key]['wear_window'].split('-')[0]})，存在重叠"
                     )
                     return False
 
-            # 校验每个 wear_window 至少 30 分钟（太短的窗口无法选时）
-            for key in ("look_1", "look_2"):
-                wear_window = look_times[key]["wear_window"]
-                (sh, sm), (eh, em) = self._parse_window(wear_window)
-                start_mins = sh * 60 + sm
-                end_mins = eh * 60 + em
-                if end_mins - start_mins < 30:
-                    logger.warning(f"[SmartShare] {key} wear_window {wear_window} 不足 30 分钟，无法选时")
-                    return False
-
-            # 校验 share_time：格式、落在 wear_window 内、不晚于 21:30
-            for key in ("look_1", "look_2"):
+            # 校验 share_time：格式、落在 wear_window 内、不晚于各自限制时间
+            for key in present_keys:
                 look = look_times[key]
                 share_time = look.get("share_time", "")
                 parsed_st = self._parse_hhmm(share_time)
@@ -395,9 +458,11 @@ class SmartShareScheduler:
                     logger.warning(f"[SmartShare] {key} share_time 无效: {share_time}")
                     return False
                 st_mins = parsed_st[0] * 60 + parsed_st[1]
-                # 不晚于 21:30（避免深夜昏暗光源时段）
-                if st_mins > 21 * 60 + 30:
-                    logger.warning(f"[SmartShare] {key} share_time {share_time} 晚于 21:30，可能光线昏暗")
+                # 前两套不晚于 21:30（避免深夜昏暗光源时段）；第三套（夜间居家装）放宽到 23:30
+                latest_allowed = 23 * 60 + 30 if key == "look_3" else 21 * 60 + 30
+                if st_mins > latest_allowed:
+                    logger.warning(f"[SmartShare] {key} share_time {share_time} 晚于 "
+                                   f"{latest_allowed // 60}:{latest_allowed % 60:02d}，可能光线昏暗")
                     return False
                 # 必须在 wear_window 内
                 (sh, sm), (eh, em) = self._parse_window(look["wear_window"])
@@ -422,9 +487,16 @@ class SmartShareScheduler:
             existing_shares: 同 umo 下其他角色已选的分享时间 [(h, m), ...]，供 LLM 均匀分布参考
         """
         provider_id = self._get_smart_provider_id(persona_name)
-        prompt = self._build_analyze_prompt(dayflow_data, existing_shares or [])
+        night_look_enabled = self._is_night_look_enabled(persona_name)
+        prompt = self._build_analyze_prompt(
+            dayflow_data, existing_shares or [],
+            night_look_enabled=night_look_enabled, persona_name=persona_name,
+        )
 
-        logger.info(f"[SmartShare] 调用 LLM 分析日程 [{persona_name}], provider={provider_id or 'default'}")
+        logger.info(
+            f"[SmartShare] 调用 LLM 分析日程 [{persona_name}], "
+            f"provider={provider_id or 'default'}, night_look={'on' if night_look_enabled else 'off'}"
+        )
 
         response = await self.plugin._call_llm_wrapper(
             prompt=prompt,
@@ -448,13 +520,15 @@ class SmartShareScheduler:
             logger.warning(f"[SmartShare] LLM 输出时间点不合理 [{persona_name}]: {look_times}")
             return None
 
-        logger.info(
-            f"[SmartShare] LLM 分析成功 [{persona_name}]: "
-            f"look_1 wear_window={look_times['look_1'].get('wear_window','')}, "
-            f"share_time={look_times['look_1'].get('share_time','')}; "
-            f"look_2 wear_window={look_times['look_2'].get('wear_window','')}, "
-            f"share_time={look_times['look_2'].get('share_time','')}"
-        )
+        log_parts = []
+        for key in ("look_1", "look_2", "look_3"):
+            if key in look_times and look_times.get(key):
+                look = look_times[key]
+                log_parts.append(
+                    f"{key} wear_window={look.get('wear_window','')}, "
+                    f"share_time={look.get('share_time','')}"
+                )
+        logger.info(f"[SmartShare] LLM 分析成功 [{persona_name}]: " + "; ".join(log_parts))
         return look_times
 
     # ============ 随机选时与跨人格协调 ============
@@ -716,9 +790,12 @@ class SmartShareScheduler:
                 f"{[f'{h:02d}:{m:02d}' for (h, m) in conflict_times]}"
             )
 
-        # 为每套穿搭确定 share_time
+        # 为每套穿搭确定 share_time（look_1/look_2 必选，look_3 可选，按实际存在动态处理）
+        present_keys = [k for k in ("look_1", "look_2") if look_times.get(k)]
+        if look_times.get("look_3"):
+            present_keys.append("look_3")
         picked_times = {}
-        for look_key in ("look_1", "look_2"):
+        for look_key in present_keys:
             look = look_times.get(look_key, {})
             wear_window = look.get("wear_window", "")
             llm_share_time = look.get("share_time", "")
@@ -752,7 +829,7 @@ class SmartShareScheduler:
                 f"（穿搭时段: {wear_window}）"
             )
 
-        # 准备状态
+        # 准备状态（含第三套时追加 look_3）
         state_key = self._get_state_key(persona_name)
         state = {
             "date": today_str,
@@ -767,9 +844,15 @@ class SmartShareScheduler:
                 "executed": False
             }
         }
+        if "look_3" in present_keys:
+            state["look_3"] = {
+                "share_time": picked_times["look_3"],
+                "wear_window": look_times["look_3"].get("wear_window", ""),
+                "executed": False
+            }
 
         # 注册任务
-        for idx, look_key in enumerate(["look_1", "look_2"]):
+        for idx, look_key in enumerate(present_keys):
             share_time = picked_times[look_key]
             wear_window = look_times[look_key].get("wear_window", "")
 
@@ -983,9 +1066,13 @@ class SmartShareScheduler:
         if existing_jobs:
             return
 
-        # 任务丢失，根据 state 重新注册
+        # 任务丢失，根据 state 重新注册（look_1/look_2 必选，look_3 可选，按 state 实际存在动态处理）
         re_registered = 0
-        for idx, look_key in enumerate(["look_1", "look_2"]):
+        present_keys = [k for k in ("look_1", "look_2") if state.get(k)]
+        for k in ("look_3",):
+            if state.get(k):
+                present_keys.append(k)
+        for idx, look_key in enumerate(present_keys):
             look_state = state.get(look_key, {})
             if look_state.get("executed") or look_state.get("skipped"):
                 continue

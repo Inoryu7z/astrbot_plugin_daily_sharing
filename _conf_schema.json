@@ -204,6 +204,12 @@
                 "type": "bool",
                 "default": true,
                 "hint": "智能调度失败（LLM 超时/dayflow 未就绪/解析失败）时，是否回退到原随机分享机制"
+              },
+              "smart_share_night_look": {
+                "description": "夜间居家装三次分享",
+                "type": "bool",
+                "default": false,
+                "hint": "开启后，当 dayflow 当日日程含夜间居家装（第三套）时，额外识别晚间穿搭时段并分享第三次；当天无第三套时自动降级为两套。关闭则维持早/午后两次分享。需 dayflow 新版支持 night_look"
               }
             }
           },
