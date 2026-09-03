@@ -405,6 +405,19 @@ class ImageService:
             logger.debug(f"[DailySharing] 获取默认人格名失败: {e}")
         return None
 
+    def _build_manual_image_chain(self, persona_name: str = None):
+        """读取人格级 image_chain_override 配置，构造 aiimg edit 的 chain_override。
+
+        返回 [{"provider_id": ...}, ...]；未配置或全部为空时返回 None（回退 aiimg 人格自拍链路）。
+        """
+        raw = self.plugin.get_persona_config_value(
+            persona_name, "persona_image_conf", "image_chain_override", []
+        )
+        if not isinstance(raw, list):
+            return None
+        items = [{"provider_id": str(pid).strip()} for pid in raw if str(pid).strip()]
+        return items if items else None
+
     async def _regenerate_prompt_avoiding_sensitive(
         self, content: str, life_context: str,
         old_prompt: str, persona_name: str = None
@@ -478,13 +491,21 @@ class ImageService:
 
             logger.info(f"[DailySharing] 获取到 {len(ref_images)} 张参考图")
 
-            chain_override = None
-            if hasattr(aiimg, "_get_persona_selfie_chain"):
+            chain_override = self._build_manual_image_chain(persona_name)
+            chain_source = "手动指定(dailysharing配置)"
+            if not chain_override and hasattr(aiimg, "_get_persona_selfie_chain"):
                 chain_override = aiimg._get_persona_selfie_chain(resolved_persona)
+                chain_source = "复用aiimg人格自拍链路"
 
             if not chain_override:
-                logger.error(f"[DailySharing] 人格「{resolved_persona}」未配置自拍服务商链路。请在 aiimg 插件的 WebUI 中为该人格配置 chain。")
+                logger.error(f"[DailySharing] 人格「{resolved_persona}」未配置自拍服务商链路。请在 dailysharing 中配置 image_chain_override，或在 aiimg 插件 WebUI 中为人格配置 chain。")
                 return None, None
+
+            chain_pids = [
+                item.get("provider_id") if isinstance(item, dict) else item
+                for item in chain_override
+            ]
+            logger.info(f"[DailySharing] 配图链路来源: {chain_source} -> {chain_pids}")
 
             persona_default_output = ""
             if hasattr(aiimg, "_get_persona_selfie_config"):

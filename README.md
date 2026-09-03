@@ -133,7 +133,7 @@
 2. **📚 内容库自定义**：自定义【推荐】库话题池，格式 `大类: 标签1, 标签2`（如 `游戏: 独立神作, 治愈解谜`）。
 3. **📅 早报设置**：独立配置每天 08:00 长图早报，支持一键同步 QQ 空间。
 4. **🌟 QQ 空间专属**：独立于群聊/私聊的 Cron 定时器与发布序列；自动屏蔽"大家好"等社交词汇，强制第一人称"日记体"。
-5. **🎨 配图与视频**：建议开启配合 aiimg 插件；视频生成仅建议为 `greeting` 和 `mood` 开启；智能视频提示词（`enable_smart_video_prompt`）默认开启，可指定独立识图 LLM（`video_llm_provider_id`）。
+5. **🎨 配图与视频**：建议开启配合 aiimg 插件；配图默认复用 aiimg 为人格配置的自拍链路，可填写 `image_chain_override` 手动指定画图 provider 链路（按顺序失败顺延）；视频生成仅建议为 `greeting` 和 `mood` 开启；智能视频提示词（`enable_smart_video_prompt`）默认开启，可指定独立识图 LLM（`video_llm_provider_id`）。
 6. **🔍 联网检索**：默认开启，结合 Tavily 让热搜点评、推荐更具真实感。
 7. **🤖 模型与人设**：可单独指定 LLM 模型，崩溃时自动降级到系统第一个可用模型；每个人格可独立配置 LLM（`persona_llm_conf.llm_provider_id`）与超时。
 8. **🧠 智能分享调度（人格级 `persona_smart_share_conf`）**：
