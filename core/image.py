@@ -408,14 +408,27 @@ class ImageService:
     def _build_manual_image_chain(self, persona_name: str = None):
         """读取人格级 image_chain_override 配置，构造 aiimg edit 的 chain_override。
 
-        返回 [{"provider_id": ...}, ...]；未配置或全部为空时返回 None（回退 aiimg 人格自拍链路）。
+        每个 provider 优先携带其后端配置的图生图尺寸（default_edit_size/default_size），
+        未配置时留空 output，由 edit 回退到人格 default_output。
+        返回 [{"provider_id": ..., "output": ...}, ...]；未配置或全部为空时返回 None（回退 aiimg 人格自拍链路）。
         """
         raw = self.plugin.get_persona_config_value(
             persona_name, "persona_image_conf", "image_chain_override", []
         )
         if not isinstance(raw, list):
             return None
-        items = [{"provider_id": str(pid).strip()} for pid in raw if str(pid).strip()]
+        aiimg = self._aiimg_plugin
+        items = []
+        for pid in raw:
+            pid = str(pid).strip()
+            if not pid:
+                continue
+            item = {"provider_id": pid}
+            if aiimg and hasattr(aiimg, "_get_provider_edit_size"):
+                edit_size = aiimg._get_provider_edit_size(pid)
+                if edit_size:
+                    item["output"] = edit_size
+            items.append(item)
         return items if items else None
 
     async def _regenerate_prompt_avoiding_sensitive(
@@ -506,6 +519,18 @@ class ImageService:
                 for item in chain_override
             ]
             logger.info(f"[DailySharing] 配图链路来源: {chain_source} -> {chain_pids}")
+
+            # ark_seedream 单图模式：链路含 ark 时只传第 1 张人设参考图 + 提示词替换（保证 ark 能成功）
+            if hasattr(aiimg, "_is_ark_seedream_provider"):
+                for item in chain_override:
+                    pid = item.get("provider_id") if isinstance(item, dict) else item
+                    if pid and aiimg._is_ark_seedream_provider(str(pid)):
+                        if len(ref_images) > 1:
+                            ref_images = ref_images[:1]
+                            logger.info("[DailySharing] 链路含 ark_seedream，仅传第 1 张人设参考图")
+                        if prompt:
+                            prompt = re.sub(r"前[三3两2一1\d]+张(?:人设)?参考图", "参考图", prompt)
+                        break
 
             persona_default_output = ""
             if hasattr(aiimg, "_get_persona_selfie_config"):
