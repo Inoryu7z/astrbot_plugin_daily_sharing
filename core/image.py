@@ -545,8 +545,18 @@ class ImageService:
                 logger.info("[DailySharing] 【DEBUG】自拍模式参数：")
                 logger.info(f"[DailySharing] 【DEBUG】人格: {resolved_persona}")
                 logger.info(f"[DailySharing] 【DEBUG】参考图数量: {len(ref_images)}")
-                logger.info(f"[DailySharing] 【DEBUG】服务商链路: {[x.get('provider_id') for x in chain_override if isinstance(x, dict)]}")
-                logger.info(f"[DailySharing] 【DEBUG】输出尺寸: {persona_default_output or 'default'}")
+                logger.info(f"[DailySharing] 【DEBUG】服务商链路: {chain_pids}")
+                # 实际生效尺寸：链路项 output 优先，未配置则回退人格 default_output，再回退后端默认
+                size_desc = []
+                for item in chain_override:
+                    if isinstance(item, dict):
+                        pid = str(item.get("provider_id") or item.get("provider") or "").strip()
+                        out = str(item.get("output") or item.get("default_output") or "").strip()
+                    else:
+                        pid = str(item).strip()
+                        out = ""
+                    size_desc.append(f"{pid}={out or persona_default_output or '后端默认'}")
+                logger.info(f"[DailySharing] 【DEBUG】链路实际尺寸: {', '.join(size_desc)}")
                 logger.info(f"[DailySharing] 【DEBUG】完整 Prompt:\n{final_prompt}")
                 logger.info("=" * 60)
 
