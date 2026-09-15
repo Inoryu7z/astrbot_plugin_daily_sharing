@@ -424,7 +424,7 @@ class TaskManager:
         self._spawn_bg_task(self._make_persona_qzone_random_scheduler(persona_name)())
         logger.debug(f"[DailySharing] 人格 [{persona_name}] QQ空间已启用多时间段随机生成模式")
 
-    def _make_task_wrapper(self, persona_name: str):
+    def _make_task_wrapper(self, persona_name: str, night_look: bool = False):
         async def wrapper():
             if self.plugin._is_terminated: return
             try:
@@ -433,10 +433,10 @@ class TaskManager:
             except Exception as e:
                 logger.warning(f"[DailySharing] 数据库清理失败: {e}")
 
-            await self._make_delayed_task(persona_name)()
+            await self._make_delayed_task(persona_name, night_look=night_look)()
         return wrapper
 
-    def _make_delayed_task(self, persona_name: str):
+    def _make_delayed_task(self, persona_name: str, night_look: bool = False):
         async def delayed():
             if self.plugin._is_terminated: return
             task = asyncio.current_task()
@@ -459,7 +459,7 @@ class TaskManager:
                     self.plugin._last_share_time[debounce_key] = now
                     await self._mark_current_period_executed(state_key, now)
                     logger.info(f"[DailySharing] 开始执行分享任务 [人格: {persona_name}]...")
-                    await self.execute_share(persona_name=persona_name)
+                    await self.execute_share(persona_name=persona_name, night_look=night_look)
             finally:
                 self.plugin._bg_tasks.discard(task)
         return delayed
@@ -1408,7 +1408,7 @@ class TaskManager:
             except Exception as e:
                 logger.error(f"[DailySharing] 分享早报到 {uid} 失败: {e}")
 
-    async def execute_share(self, force_type: SharingType = None, news_source: str = None, specific_target: str = None, persona_name: str = None):
+    async def execute_share(self, force_type: SharingType = None, news_source: str = None, specific_target: str = None, persona_name: str = None, night_look: bool = False):
         if self.plugin._is_terminated: return
 
         period = self.get_curr_period()
@@ -1523,7 +1523,7 @@ class TaskManager:
 
                 if enable_img_global:
                     if stype.value in img_allowed_types:
-                        ai_img_path = await self.image_service.generate_image(content, stype, life_ctx, persona_name=persona_name)
+                        ai_img_path = await self.image_service.generate_image(content, stype, life_ctx, persona_name=persona_name, night=night_look)
                         if ai_img_path:
                             img_path = ai_img_path
 

@@ -729,8 +729,8 @@ class SmartShareScheduler:
         """
         async def wrapper():
             if self.plugin._is_terminated: return
-            # 先调用原始任务链路（DB清理 + execute_share）
-            await self.task_manager._make_task_wrapper(persona_name)()
+            # 先调用原始任务链路（DB清理 + execute_share）；第三套（晚间居家装）配图走独立晚间链路
+            await self.task_manager._make_task_wrapper(persona_name, night_look=(look_key == "look_3"))()
             # 执行后再标记该 look 为已执行（防止插件重载后 recover_smart_state 重复注册）
             try:
                 state_key = self._get_state_key(persona_name)

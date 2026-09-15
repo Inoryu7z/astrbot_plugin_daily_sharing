@@ -249,6 +249,15 @@
                 "default": [],
                 "hint": "填写 aiimg 插件中已配置的 provider_id 列表（如 [\"provider_a\", \"provider_b\"]），配图时按顺序依次尝试，失败自动顺延到下一个。留空则复用 aiimg 为该人格配置的自拍链路"
               },
+              "image_chain_override_night": {
+                "description": "夜间第三套（晚间居家装）专用画图链路",
+                "type": "list",
+                "items": {
+                  "type": "string"
+                },
+                "default": [],
+                "hint": "仅在智能分享开启 smart_share_night_look 且当日有第三套（look_3）时生效。结构与 image_chain_override 相同（provider_id 列表，按顺序尝试）。留空则回退到 image_chain_override，再留空则复用 aiimg 人格自拍链路"
+              },
               "enable_ai_video": {
                 "description": "启用生成视频",
                 "type": "bool",

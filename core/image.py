@@ -179,7 +179,7 @@ class ImageService:
 
     # ==================== 2. 主入口 ====================
 
-    async def generate_image(self, content: str, sharing_type: SharingType, life_context: str = None, persona_name: str = None) -> Optional[str]:
+    async def generate_image(self, content: str, sharing_type: SharingType, life_context: str = None, persona_name: str = None, night: bool = False) -> Optional[str]:
         if not self.plugin.get_persona_config_value(persona_name, "persona_image_conf", "enable_ai_image", False): return None
 
         is_text_priority = False
@@ -205,7 +205,7 @@ class ImageService:
         current_prompt = prompt
 
         for attempt in range(1 + max_sensitive_retries):
-            result, sensitive_type = await self._call_aiimg_selfie(current_prompt, persona_name=persona_name)
+            result, sensitive_type = await self._call_aiimg_selfie(current_prompt, persona_name=persona_name, night=night)
 
             if result:
                 self._last_image_description = current_prompt
@@ -405,16 +405,24 @@ class ImageService:
             logger.debug(f"[DailySharing] 获取默认人格名失败: {e}")
         return None
 
-    def _build_manual_image_chain(self, persona_name: str = None):
-        """读取人格级 image_chain_override 配置，构造 aiimg edit 的 chain_override。
+    def _build_manual_image_chain(self, persona_name: str = None, night: bool = False):
+        """读取人格级画图链路配置，构造 aiimg edit 的 chain_override。
 
         每个 provider 优先携带其后端配置的图生图尺寸（default_edit_size/default_size），
         未配置时留空 output，由 edit 回退到人格 default_output。
+        night=True 时读晚间专用配置（image_chain_override_night），
+        晚间配置为空时回退到白天配置（image_chain_override）。
         返回 [{"provider_id": ..., "output": ...}, ...]；未配置或全部为空时返回 None（回退 aiimg 人格自拍链路）。
         """
         raw = self.plugin.get_persona_config_value(
             persona_name, "persona_image_conf", "image_chain_override", []
         )
+        if night:
+            night_raw = self.plugin.get_persona_config_value(
+                persona_name, "persona_image_conf", "image_chain_override_night", []
+            )
+            if isinstance(night_raw, list) and night_raw:
+                raw = night_raw
         if not isinstance(raw, list):
             return None
         aiimg = self._aiimg_plugin
@@ -466,7 +474,7 @@ class ImageService:
             clean = re.sub(r"\n?```$", "", clean)
         return clean.strip() or None
 
-    async def _call_aiimg_selfie(self, prompt: str, persona_name: str = None):
+    async def _call_aiimg_selfie(self, prompt: str, persona_name: str = None, night: bool = False):
         self._ensure_plugin()
         if not self._aiimg_plugin:
             logger.error("[DailySharing] 未找到AI图像插件，请确保已安装 astrbot_plugin_aiimg")
@@ -504,8 +512,8 @@ class ImageService:
 
             logger.info(f"[DailySharing] 获取到 {len(ref_images)} 张参考图")
 
-            chain_override = self._build_manual_image_chain(persona_name)
-            chain_source = "手动指定(dailysharing配置)"
+            chain_override = self._build_manual_image_chain(persona_name, night=night)
+            chain_source = "手动指定-晚间(dailysharing配置)" if night else "手动指定(dailysharing配置)"
             if not chain_override and hasattr(aiimg, "_get_persona_selfie_chain"):
                 chain_override = aiimg._get_persona_selfie_chain(resolved_persona)
                 chain_source = "复用aiimg人格自拍链路"
