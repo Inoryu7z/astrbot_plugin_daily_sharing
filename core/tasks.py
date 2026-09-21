@@ -1967,7 +1967,9 @@ class TaskManager:
                 postsplitter = self.ctx_service._find_plugin("postsplitter")
                 if postsplitter and hasattr(postsplitter, "split_text_external"):
                     result = postsplitter.split_text_external(clean_text)
-                    if result and len(result) > 1:
+                    # 单段结果同样要用：postsplitter 的「去除换行符」「去尾标点」等清洗对单段也生效，
+                    # 丢弃结果会把原文里的换行原样发出去（分段与否由 postsplitter 自己决定）
+                    if result:
                         segments = result
             except Exception as e:
                 logger.debug(f"[DailySharing] PostSplitter 分段失败: {e}")
