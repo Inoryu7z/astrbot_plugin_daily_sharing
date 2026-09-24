@@ -6,6 +6,7 @@ import asyncio
 from typing import Optional, Dict, Any, List
 from astrbot.api import logger
 from ..config import SharingType, TimePeriod 
+from .outfit import resolve_current_outfit, find_current_slot
 
 try:
     from astrbot.core.agent.message import (
@@ -244,23 +245,39 @@ class ContextService:
             logger.debug(f"[上下文] 查找 Life Scheduler 插件失败: {e}")
         return None
 
-    async def get_life_context(self, persona_name: str = None) -> Optional[str]:
+    async def get_life_context_bundle(self, persona_name: str = None, look_key: str = None) -> Optional[dict]:
+        """获取生活上下文（含当前穿搭的结构化版本）
+
+        返回 ``{"text": 注入 LLM 的文本, "current_outfit": 当前生效穿搭, "raw": dayflow 原始数据}``；
+        取不到日程时返回 None。
+
+        look_key 为智能分享的 look_1/look_2/look_3 时按该套取穿搭（不受执行时刻漂移影响），
+        为空则按当前时间推断当前生效的那套。
+        """
         plugin = self._find_life_plugin()
         if not plugin:
             return None
 
-        try: 
+        try:
             raw_data = await plugin.get_life_context(persona_name=persona_name)
-            
+
             if isinstance(raw_data, dict):
-                return self._parse_life_data(raw_data)
-            
-        except Exception as e: 
+                return {
+                    "text": self._parse_life_data(raw_data, look_key=look_key),
+                    "current_outfit": resolve_current_outfit(raw_data, look_key=look_key),
+                    "raw": raw_data,
+                }
+
+        except Exception as e:
             logger.warning(f"[上下文] Life Scheduler 方法调用出错: {e}")
-        
+
         return None
 
-    def _parse_life_data(self, data: dict) -> str:
+    async def get_life_context(self, persona_name: str = None, look_key: str = None) -> Optional[str]:
+        bundle = await self.get_life_context_bundle(persona_name=persona_name, look_key=look_key)
+        return bundle["text"] if bundle else None
+
+    def _parse_life_data(self, data: dict, look_key: str = None) -> str:
         """解析 Life Scheduler 返回的 JSON 数据为自然语言"""
         try:
             parts = []
@@ -270,8 +287,15 @@ class ContextService:
             if weather: parts.append(f"【今日天气】{weather}")
             
             # 2. 穿搭
-            outfit = data.get("outfit", "")
-            if outfit: parts.append(f"【今日穿搭】{outfit}")
+            # dayflow 顶层 outfit 只是"晨间第一套"，第二/三套写在 timeline 的 outfit_change 里。
+            # 这里以"当前生效的那套"为准（智能分享按 look 取，其余按当前时间推断），
+            # 晨间那套仅在已被换下时作为参考信息保留，避免配图/文案照抄早上那套。
+            current_outfit = resolve_current_outfit(data, look_key=look_key)
+            morning_outfit = str(data.get("outfit") or "").strip()
+            if current_outfit:
+                parts.append(f"【你现在穿着的穿搭】{current_outfit}")
+            if morning_outfit and morning_outfit != current_outfit:
+                parts.append(f"【今日晨间穿搭（已换下，仅供了解，禁止用于当前画面）】{morning_outfit}")
             
             # 3. 完整元数据 (Meta)
             meta = data.get("meta", {})
@@ -289,21 +313,17 @@ class ContextService:
                 parts.append(f"【今日基调】{' | '.join(meta_str)}")
                 
             # 4. 提取当前活动
+            # dayflow timeline 的字段是 time_start/time_end/title/detail（不是 time/activity/status），
+            # 旧实现读错字段导致这里恒为 timeline 最后一项且内容为 None，现已修正为按时间区间匹配。
             timeline = data.get("timeline", [])
             if timeline:
-                import datetime
-                now = datetime.datetime.now()
-                now_mins = now.hour * 60 + now.minute
-                current_act = None
-                for item in timeline:
-                    try:
-                        h, m = map(int, item.get("time", "00:00").split(':'))
-                        if h * 60 + m <= now_mins:
-                            current_act = item
-                    except:
-                        pass
-                if current_act:
-                    parts.append(f"【当前活动】{current_act.get('activity')} (状态: {current_act.get('status', '未知')})")
+                current_slot = find_current_slot(timeline)
+                if current_slot:
+                    span = f"{current_slot.get('time_start', '')}-{current_slot.get('time_end', '')}".strip("-")
+                    title = str(current_slot.get("title") or "").strip()
+                    cur_line = f"{span} {title}".strip()
+                    if cur_line:
+                        parts.append(f"【当前活动】{cur_line}")
 
             # 5. 提取备忘录和长期记忆
             memo = data.get("memo", "")

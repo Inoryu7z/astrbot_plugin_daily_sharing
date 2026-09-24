@@ -5,6 +5,12 @@ from typing import Optional
 from astrbot.api import logger
 from ..config import SharingType, TimePeriod
 
+# 穿搭硬性约束：直接拼进 user_prompt，保证即使用户自定义了视觉导演 system_prompt 也生效
+OUTFIT_LOCK_BLOCK = """【穿搭硬性要求（最高优先级，覆盖其他任何服装描述）】
+画面中少女所穿的整套服装，必须且只能逐件对应下面这套穿搭的款式、颜色、材质与版型：
+{outfit}
+严禁使用其他时段（含"晨间穿搭"）的服装，严禁自行编造、替换或混搭任何单品。"""
+
 class ImageService:
     def __init__(self, context, config, llm_func, plugin=None):
         self.context = context
@@ -113,14 +119,19 @@ class ImageService:
 
         return system_prompt
 
-    async def _agent_extract_visuals(self, content: str, life_context: str, persona_name: str = None) -> Optional[str]:
+    async def _agent_extract_visuals(self, content: str, life_context: str, persona_name: str = None, current_outfit: str = "") -> Optional[str]:
         if not content and not life_context: return None
 
         curr_time = f"{datetime.now().hour:02d}:{datetime.now().minute:02d}"
 
         system_prompt = self._build_visual_system_prompt()
 
-        user_prompt = f"【分享文案】：{content}\n【生活日程】：{life_context}\n\n请生成绘画提示词："
+        # 穿搭锁定块放在 user_prompt（不经 system 模板），自定义视觉导演提示词的用户同样生效
+        outfit_lock = ""
+        if current_outfit:
+            outfit_lock = "\n\n" + OUTFIT_LOCK_BLOCK.format(outfit=current_outfit)
+
+        user_prompt = f"【分享文案】：{content}\n【生活日程】：{life_context}{outfit_lock}\n\n请生成绘画提示词："
 
         if self.debug_mode:
             logger.info("-" * 60)
@@ -152,6 +163,10 @@ class ImageService:
 {logic_prompt}
 严禁提取 {curr_time} 之后的日程作为当前场景。
 
+【穿搭来源】少女此刻的穿着只能取自【生活日程】中【你现在穿着的穿搭】所描述的那一套
+（若提示中另外给出了【穿搭硬性要求】，以它为准）。严禁使用【今日晨间穿搭】或其他时段的换装描述，
+严禁自行编造或拼接服装。
+
 【输出格式】
 输出一段连贯的自然语言段落，直接作为 AI 绘画提示词。禁止输出 JSON、禁止使用分类标签（如"内搭：""外穿：""风格："等元标记）。
 
@@ -179,7 +194,7 @@ class ImageService:
 
     # ==================== 2. 主入口 ====================
 
-    async def generate_image(self, content: str, sharing_type: SharingType, life_context: str = None, persona_name: str = None, night: bool = False) -> Optional[str]:
+    async def generate_image(self, content: str, sharing_type: SharingType, life_context: str = None, persona_name: str = None, night: bool = False, current_outfit: str = "") -> Optional[str]:
         if not self.plugin.get_persona_config_value(persona_name, "persona_image_conf", "enable_ai_image", False): return None
 
         is_text_priority = False
@@ -224,7 +239,7 @@ class ImageService:
                     # 输入文本敏感：提示词触发敏感，调用 LLM 降低敏感度重新生成
                     logger.warning(f"[DailySharing] 输入文本敏感(第{attempt+1}次)，重新生成提示词降敏感度...")
                     current_prompt = await self._regenerate_prompt_avoiding_sensitive(
-                        content, life_context, current_prompt, persona_name
+                        content, life_context, current_prompt, persona_name, current_outfit=current_outfit
                     )
                     if not current_prompt:
                         logger.warning("[DailySharing] 重新生成提示词失败，放弃配图")
@@ -441,7 +456,7 @@ class ImageService:
 
     async def _regenerate_prompt_avoiding_sensitive(
         self, content: str, life_context: str,
-        old_prompt: str, persona_name: str = None
+        old_prompt: str, persona_name: str = None, current_outfit: str = ""
     ) -> Optional[str]:
         # 复用主提示词作为 system_prompt，保证格式要求（开头/结尾/要素）与首次配图一致
         system_prompt = self._build_visual_system_prompt()
@@ -451,7 +466,10 @@ class ImageService:
             "可能是因为描述中包含了过于暴露的服装、暗示性姿势、或其他敏感元素。\n\n"
             f"原提示词：{old_prompt}\n\n"
             "请重新生成，务必降低敏感度：穿搭保守日常、动作自然大方、避免特写敏感部位。"
+            "但服装款式、颜色、材质与版型必须仍然严格对应下面这套穿搭，不得因为降敏感度而更换整套服装。"
         )
+        if current_outfit:
+            retry_prompt += "\n\n" + OUTFIT_LOCK_BLOCK.format(outfit=current_outfit)
         if content:
             retry_prompt += f"\n\n分享内容：{content}"
         if life_context:

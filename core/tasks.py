@@ -424,7 +424,7 @@ class TaskManager:
         self._spawn_bg_task(self._make_persona_qzone_random_scheduler(persona_name)())
         logger.debug(f"[DailySharing] 人格 [{persona_name}] QQ空间已启用多时间段随机生成模式")
 
-    def _make_task_wrapper(self, persona_name: str, night_look: bool = False):
+    def _make_task_wrapper(self, persona_name: str, night_look: bool = False, look_key: str = None):
         async def wrapper():
             if self.plugin._is_terminated: return
             try:
@@ -433,10 +433,10 @@ class TaskManager:
             except Exception as e:
                 logger.warning(f"[DailySharing] 数据库清理失败: {e}")
 
-            await self._make_delayed_task(persona_name, night_look=night_look)()
+            await self._make_delayed_task(persona_name, night_look=night_look, look_key=look_key)()
         return wrapper
 
-    def _make_delayed_task(self, persona_name: str, night_look: bool = False):
+    def _make_delayed_task(self, persona_name: str, night_look: bool = False, look_key: str = None):
         async def delayed():
             if self.plugin._is_terminated: return
             task = asyncio.current_task()
@@ -459,7 +459,7 @@ class TaskManager:
                     self.plugin._last_share_time[debounce_key] = now
                     await self._mark_current_period_executed(state_key, now)
                     logger.info(f"[DailySharing] 开始执行分享任务 [人格: {persona_name}]...")
-                    await self.execute_share(persona_name=persona_name, night_look=night_look)
+                    await self.execute_share(persona_name=persona_name, night_look=night_look, look_key=look_key)
             finally:
                 self.plugin._bg_tasks.discard(task)
         return delayed
@@ -1259,7 +1259,9 @@ class TaskManager:
             period = self.get_curr_period()
             
             # 准备数据
-            life_ctx = await self.ctx_service.get_life_context(persona_name=persona_name)
+            life_bundle = await self.ctx_service.get_life_context_bundle(persona_name=persona_name)
+            life_ctx = life_bundle["text"] if life_bundle else None
+            current_outfit = life_bundle["current_outfit"] if life_bundle else ""
             news_data = None
             
             # 初始化 img_path (可能用于存放热搜截图)
@@ -1312,7 +1314,7 @@ class TaskManager:
                     should_gen_visual = True
 
             if should_gen_visual:
-                ai_img_path = await self.image_service.generate_image(content, target_type_enum, life_ctx)
+                ai_img_path = await self.image_service.generate_image(content, target_type_enum, life_ctx, persona_name=persona_name, current_outfit=current_outfit)
                 if ai_img_path:
                     img_path = ai_img_path
                 
@@ -1408,11 +1410,17 @@ class TaskManager:
             except Exception as e:
                 logger.error(f"[DailySharing] 分享早报到 {uid} 失败: {e}")
 
-    async def execute_share(self, force_type: SharingType = None, news_source: str = None, specific_target: str = None, persona_name: str = None, night_look: bool = False):
+    async def execute_share(self, force_type: SharingType = None, news_source: str = None, specific_target: str = None, persona_name: str = None, night_look: bool = False, look_key: str = None):
         if self.plugin._is_terminated: return
 
         period = self.get_curr_period()
-        life_ctx = await self.ctx_service.get_life_context(persona_name=persona_name)
+        # look_key 为智能分享的 look_1/look_2/look_3：文案与配图以该套穿搭为准，
+        # 避免补偿触发（重载恢复、时间点已过但在穿搭时段内）导致真实时间漂移后画错套
+        life_bundle = await self.ctx_service.get_life_context_bundle(persona_name=persona_name, look_key=look_key)
+        life_ctx = life_bundle["text"] if life_bundle else None
+        current_outfit = life_bundle["current_outfit"] if life_bundle else ""
+        if current_outfit:
+            logger.info(f"[DailySharing] [{persona_name}] 穿搭解析: look_key={look_key or '按当前时间推断'}")
 
         targets = []
         
@@ -1502,7 +1510,7 @@ class TaskManager:
                         recent_dynamics_str = "\n".join(lines)
 
                 content = await self.content_service.generate(
-                    stype, period, uid, is_group, life_prompt, hist_prompt, news_data, nickname=nickname, recent_dynamics=recent_dynamics_str, persona_name=persona_name
+                    stype, period, uid, is_group, life_prompt, hist_prompt, news_data, nickname=nickname, recent_dynamics=recent_dynamics_str, persona_name=persona_name, look_key=look_key
                 )
                 
                 if not content:
@@ -1523,7 +1531,7 @@ class TaskManager:
 
                 if enable_img_global:
                     if stype.value in img_allowed_types:
-                        ai_img_path = await self.image_service.generate_image(content, stype, life_ctx, persona_name=persona_name, night=night_look)
+                        ai_img_path = await self.image_service.generate_image(content, stype, life_ctx, persona_name=persona_name, night=night_look, current_outfit=current_outfit)
                         if ai_img_path:
                             img_path = ai_img_path
 
@@ -1586,7 +1594,9 @@ class TaskManager:
             stype = force_type if force_type else await self.decide_type_with_state(period, is_qzone=True, specific_type="auto", persona_name=persona_name)
             logger.info(f"[DailySharing] [{persona_name}] QQ空间时段: {period.value}, 类型: {stype.value}")
 
-            life_ctx = await self.ctx_service.get_life_context(persona_name=persona_name)
+            life_bundle = await self.ctx_service.get_life_context_bundle(persona_name=persona_name)
+            life_ctx = life_bundle["text"] if life_bundle else None
+            current_outfit = life_bundle["current_outfit"] if life_bundle else ""
             news_data = None
             
             # 如果是发新闻，单独获取热搜（支持手动指定源）
@@ -1646,7 +1656,7 @@ class TaskManager:
                 if stype.value in qzone_img_allowed_types:
                     logger.info("[DailySharing] 正在为QQ空间生成配图...")
                     try:
-                        new_img_path = await self.image_service.generate_image(clean_qzone_content, stype, life_ctx, persona_name=persona_name)
+                        new_img_path = await self.image_service.generate_image(clean_qzone_content, stype, life_ctx, persona_name=persona_name, current_outfit=current_outfit)
                         if new_img_path:
                             target_local_img = new_img_path
                     except Exception as e:

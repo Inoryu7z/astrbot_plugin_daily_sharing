@@ -250,18 +250,23 @@ class SmartShareScheduler:
 
         outfit = dayflow_data.get("outfit", "")
         if outfit:
-            parts.append(f"【今日穿搭】\n{outfit}")
+            parts.append(f"【晨间第一套穿搭】\n{outfit}")
 
+        # timeline 的真实字段是 time_start/time_end/title/detail/outfit_change。
+        # 换装描述必须一并给出，否则这里只有"第一套"，LLM 无法识别第二/三套各自的穿着时段。
+        # detail 不在此重复（由下方【日程详情】提供），避免提示词成倍膨胀。
         timeline = dayflow_data.get("timeline", [])
         if timeline:
             lines = ["【今日时间轴】"]
             for item in timeline:
-                time_str = item.get("time", "")
-                activity = item.get("activity", "")
-                status = item.get("status", "")
-                line = f"{time_str} {activity}"
-                if status:
-                    line += f"（{status}）"
+                time_start = str(item.get("time_start") or "").strip()
+                time_end = str(item.get("time_end") or "").strip()
+                title = str(item.get("title") or "").strip()
+                time_range = f"{time_start}-{time_end}" if time_start and time_end else (time_start or time_end)
+                line = f"{time_range} {title}".strip()
+                outfit_change = str(item.get("outfit_change") or "").strip()
+                if outfit_change:
+                    line += f"\n  👗 换装：{outfit_change}"
                 lines.append(line)
             parts.append("\n".join(lines))
 
@@ -729,8 +734,9 @@ class SmartShareScheduler:
         """
         async def wrapper():
             if self.plugin._is_terminated: return
-            # 先调用原始任务链路（DB清理 + execute_share）；第三套（晚间居家装）配图走独立晚间链路
-            await self.task_manager._make_task_wrapper(persona_name, night_look=(look_key == "look_3"))()
+            # 先调用原始任务链路（DB清理 + execute_share）；第三套（晚间居家装）配图走独立晚间链路，
+            # look_key 一并透传，让文案/配图按"这一套"取穿搭（补偿触发时间漂移也不会穿错）
+            await self.task_manager._make_task_wrapper(persona_name, night_look=(look_key == "look_3"), look_key=look_key)()
             # 执行后再标记该 look 为已执行（防止插件重载后 recover_smart_state 重复注册）
             try:
                 state_key = self._get_state_key(persona_name)

@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import Optional, Tuple, List, Dict
 from astrbot.api import logger
 from ..config import SharingType, TimePeriod, DEFAULT_REC_CATS, NEWS_SOURCE_MAP, DEFAULT_TOPIC_SEARCH_PROMPT, DEFAULT_TOPIC_CONTENT_PROMPT
+from .outfit import resolve_current_outfit, find_current_slot
 
 
 # 话题策略：grok 搜索专用 system_prompt（要求把 topics JSON 放进 content 字段，兼容 grok 的 parse_sources_from_message）
@@ -123,7 +124,8 @@ class ContentService:
     async def generate(self, stype: SharingType, period: TimePeriod, 
                       target_id: str, is_group: bool, 
                       life_ctx: str, chat_hist: str, news_data: tuple = None,
-                      nickname: str = "", recent_dynamics: str = "", persona_name: str = None) -> Optional[str]:
+                      nickname: str = "", recent_dynamics: str = "", persona_name: str = None,
+                      look_key: str = None) -> Optional[str]:
         persona_info = await self._get_persona_info(persona_name=persona_name)
         
         # 区分【亲昵称呼】和【网名昵称】
@@ -150,7 +152,8 @@ class ContentService:
             "nickname": call_name,      
             "detect_name": detect_name,
             "recent_dynamics": recent_dynamics,
-            "persona_name": persona_name
+            "persona_name": persona_name,
+            "look_key": look_key,
         }
         
         try:
@@ -746,7 +749,7 @@ class ContentService:
             logger.debug(f"[内容服务] 获取 DayMind 心情失败: {e}")
             return {}
 
-    async def _get_dayflow_timeline_now(self, persona_name: str = None) -> dict:
+    async def _get_dayflow_timeline_now(self, persona_name: str = None, look_key: str = None) -> dict:
         plugin = self._find_dayflow_plugin()
         if not plugin:
             return {}
@@ -770,21 +773,13 @@ class ContentService:
             outfit = data.get("outfit", "")
             summary = data.get("summary", "")
             weather = data.get("weather", "")
-            now = datetime.now()
-            now_mins = now.hour * 60 + now.minute
-            current_slot = None
-            for item in timeline:
-                try:
-                    ts = item.get("time_start", "")
-                    if ts:
-                        h, m = map(int, ts.split(':'))
-                        if h * 60 + m <= now_mins:
-                            current_slot = item
-                except Exception:
-                    pass
+            # timeline 字段是 time_start/time_end/title/detail，按时间区间取当前时段
+            current_slot = find_current_slot(timeline)
             result = {
                 "current_slot": current_slot,
                 "outfit": outfit,
+                # 当前生效的穿搭（智能分享按 look 取，其余按当前时间推断）——文案必须以它为准
+                "current_outfit": resolve_current_outfit(data, look_key=look_key),
                 "summary": summary,
                 "weather": weather,
                 "timeline": timeline,
@@ -946,7 +941,9 @@ class ContentService:
             user_info_prompt = self._build_user_prompt(call_name, detect_name)
 
         daymind_mood = await self._get_daymind_mood(persona_name=ctx.get("persona_name"))
-        dayflow_data = await self._get_dayflow_timeline_now(persona_name=ctx.get("persona_name"))
+        dayflow_data = await self._get_dayflow_timeline_now(
+            persona_name=ctx.get("persona_name"), look_key=ctx.get("look_key")
+        )
 
         mood_hint = ""
         if daymind_mood:
@@ -971,8 +968,11 @@ class ContentService:
                 activity_hint = f"【你当前正在做的事】{title}"
                 if detail:
                     activity_hint += f"：{detail}"
-            if outfit:
-                activity_hint += f"\n【你今天的穿搭】{outfit}"
+            # 以"当前生效的那套"为准（智能分享按 look 取，其余按当前时间推断），
+            # 避免下午/晚间分享时照抄早上的第一套
+            current_outfit = dayflow_data.get("current_outfit") or outfit
+            if current_outfit:
+                activity_hint += f"\n【你现在穿着的穿搭】{current_outfit}"
             if summary:
                 activity_hint += f"\n【今日主题】{summary}"
 
@@ -1032,7 +1032,9 @@ class ContentService:
             user_info_prompt = self._build_user_prompt(call_name, detect_name)
 
         daymind_mood = await self._get_daymind_mood(persona_name=ctx.get("persona_name"))
-        dayflow_data = await self._get_dayflow_timeline_now(persona_name=ctx.get("persona_name"))
+        dayflow_data = await self._get_dayflow_timeline_now(
+            persona_name=ctx.get("persona_name"), look_key=ctx.get("look_key")
+        )
 
         mood_hint = ""
         if daymind_mood:
