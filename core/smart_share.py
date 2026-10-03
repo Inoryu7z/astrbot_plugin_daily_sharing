@@ -1,7 +1,7 @@
 """智能分享调度器
 
 核心思路：每日 6 点让 LLM 读取 dayflow 当日日程，识别两套穿搭各自的穿着时段（wear_window），
-然后在 wear_window 内**随机**选一个分享时间点（带合适时段轻微加权 + 跨人格同 umo 防冲突），
+然后在 wear_window 内**随机**选一个分享时间点（带合适时段轻微加权 + 跨人格防冲突，不区分投递目标 umo），
 再用这两个时间点注册 date 任务，复用现有 execute_share 链路。
 其他一切（aiimg 配图、视觉导演、内容生成、QQ空间调度）完全不动。
 
@@ -285,7 +285,7 @@ class SmartShareScheduler:
 
         Args:
             dayflow_data: dayflow 日程数据
-            existing_shares: 同 umo 下其他角色已选的分享时间 [(h, m), ...]，供 LLM 均匀分布参考
+            existing_shares: 其他角色已选的分享时间 [(h, m), ...]，供 LLM 均匀分布参考
             night_look_enabled: 是否开启夜间居家装（第三套）三次分享
             persona_name: 人格名，用于日志
         """
@@ -489,7 +489,7 @@ class SmartShareScheduler:
         Args:
             persona_name: 人格名
             dayflow_data: dayflow 日程数据
-            existing_shares: 同 umo 下其他角色已选的分享时间 [(h, m), ...]，供 LLM 均匀分布参考
+            existing_shares: 其他角色已选的分享时间 [(h, m), ...]，供 LLM 均匀分布参考
         """
         provider_id = self._get_smart_provider_id(persona_name)
         night_look_enabled = self._is_night_look_enabled(persona_name)
@@ -538,7 +538,7 @@ class SmartShareScheduler:
 
     # ============ 随机选时与跨人格协调 ============
 
-    # 同一 umo 下两人格分享时间最小间隔（分钟）
+    # 跨人格分享时间最小间隔（分钟），不区分投递目标（umo）
     MIN_CROSS_PERSONA_GAP_MIN = 120
     # "合适分享时段"（轻微加权用），分钟数
     SUITABLE_RANGES = [
@@ -547,29 +547,13 @@ class SmartShareScheduler:
         (19 * 60, 21 * 60),   # 19:00-21:00
     ]
 
-    def _get_umo_fingerprint(self, persona_name: str) -> str:
-        """获取人格分享目标的 umo 指纹（用于跨人格冲突检测）
-
-        同一 umo（相同的 adapter + groups + users）下的多人格需要避免相近时间分享。
-        不同 umo 之间互不影响。
-        """
-        receiver = self.plugin.get_persona_receiver(persona_name)
-        adapter_id = (receiver.get("adapter_id") or "").strip()
-        groups = sorted(receiver.get("groups") or [])
-        users = sorted(receiver.get("users") or [])
-        return f"{adapter_id}|g:{','.join(groups)}|u:{','.join(users)}"
-
-    def _get_conflict_times_for_umo(self, persona_name: str) -> list:
-        """获取同一 umo 下其他人格已注册的智能分享时间点
+    def _get_conflict_times(self, persona_name: str) -> list:
+        """获取其他人格已注册的智能分享时间点
 
         扫描调度器中所有 persona_*_smart_share_* date 任务，
-        提取与当前人格共享同一 umo 的其他人格的分享时间（HH, MM）。
+        提取除当前人格外所有人格的分享时间（HH, MM）。
+        不区分投递目标（umo）：只要对方启用了智能调度并已注册任务，就参与退避。
         """
-        try:
-            current_umo = self._get_umo_fingerprint(persona_name)
-        except Exception:
-            return []
-
         conflict_times = []
         try:
             jobs = self.task_manager.scheduler.get_jobs()
@@ -591,14 +575,6 @@ class SmartShareScheduler:
                 continue
             other_persona = rest[:idx_pos]
             if other_persona == persona_name:
-                continue
-
-            # 检查 umo 是否相同
-            try:
-                other_umo = self._get_umo_fingerprint(other_persona)
-            except Exception:
-                continue
-            if other_umo != current_umo:
                 continue
 
             # 提取 date 任务的运行时间
@@ -754,7 +730,7 @@ class SmartShareScheduler:
 
         新流程：
         1. LLM 返回 wear_window 和 share_time（基于早/开阔/明亮/均匀原则选择）
-        2. 代码对 share_time 做轻微微调：与同 umo 冲突时间太近时在 wear_window 内偏移
+        2. 代码对 share_time 做轻微微调：与其他人格冲突时间太近时在 wear_window 内偏移
         3. 跨人格协调：_registration_lock 由调用方 run_smart_schedule 持有，串行化确保
            后注册者的 LLM 能看到先注册者的 share_time
         4. fallback：LLM 未返回有效 share_time 时，用 _pick_random_time_in_window 随机选
@@ -788,11 +764,11 @@ class SmartShareScheduler:
         except Exception as e:
             logger.warning(f"[SmartShare] [{persona_name}] 清理 global pending_delay_job 失败: {e}")
 
-        # 收集同 umo 其他人格已注册的分享时间（冲突列表，用于微调防并发）
-        conflict_times = self._get_conflict_times_for_umo(persona_name)
+        # 收集其他人格已注册的分享时间（冲突列表，用于微调防并发）
+        conflict_times = self._get_conflict_times(persona_name)
         if conflict_times:
             logger.info(
-                f"[SmartShare] [{persona_name}] 检测到同 umo 冲突时间: "
+                f"[SmartShare] [{persona_name}] 检测到其他人格冲突时间: "
                 f"{[f'{h:02d}:{m:02d}' for (h, m) in conflict_times]}"
             )
 
@@ -954,8 +930,8 @@ class SmartShareScheduler:
 
             # 2. LLM 分析 + 注册（锁内串行，让后注册者看到先注册者的 share_time）
             async with self._registration_lock:
-                # 收集同 umo 已注册角色的分享时间，供 LLM 均匀分布参考
-                existing_shares = self._get_conflict_times_for_umo(persona_name)
+                # 收集其他已注册角色的分享时间，供 LLM 均匀分布参考
+                existing_shares = self._get_conflict_times(persona_name)
                 if existing_shares:
                     logger.info(
                         f"[SmartShare] [{persona_name}] 已有其他角色分享时间: "
