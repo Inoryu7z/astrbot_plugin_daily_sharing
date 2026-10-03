@@ -885,6 +885,9 @@ class ContentService:
         if ctx.get('recent_dynamics'):
             dynamics_prompt = f"\n【你最近发过的动态回顾】\n{ctx['recent_dynamics']}\n【注】不要重复发过的内容"
 
+        # 私聊才注入最近对话（带低频互动规则）；群聊/QQ空间保持原状不带
+        chat_hint_prompt = f"{ctx['chat_hint']}" if (ctx.get('chat_hint') and not is_group) else ""
+
         target_str = "QQ空间" if is_qzone else ('群聊' if is_group else '私聊')
 
         prompt = f"""
@@ -895,6 +898,7 @@ class ContentService:
 
 {user_info_prompt}
 {dynamics_prompt}
+{chat_hint_prompt}
 {aftereffect_hint}
 {address_rule}
 

@@ -714,11 +714,6 @@ class ContextService:
 
     def _format_private_chat_for_prompt(self, messages: List[Dict], sharing_type: SharingType) -> str:
         max_length = 500
-        if sharing_type == SharingType.GREETING: hint = "可以根据最近的对话内容打招呼"
-        elif sharing_type == SharingType.MOOD: hint = "可以延续最近的话题或感受"
-        elif sharing_type == SharingType.NEWS: hint = "可以根据对方的兴趣选择新闻"
-        else: hint = "可以自然地延续最近的对话"
-        
         lines = []
         total_len = 0
         for m in reversed(messages[-5:]):
@@ -729,7 +724,16 @@ class ContextService:
             if total_len + len(line) > max_length: break
             lines.insert(0, line)
             total_len += len(line)
-        return "\n\n【最近的对话】\n" + "\n".join(lines) + f"\n\n{hint}\n"
+        # 频率控制：主推=按日程常规分享；偶尔才围绕最近对话写（低频档）；
+        # "绝对禁止每次"是封杀锚，防止"偶尔"被模型读成禁令而归零、或反向失控成高频
+        hint = (
+            "\n\n【关于最近对话的使用方式（重要）】\n"
+            "- 绝大多数时候，请当这些对话不存在，按上面的日程和生活状态正常分享。\n"
+            "- 只是偶尔——最近的对话里正好有让你很有表达欲、且和本次分享合得上话题时——"
+            "可以优先围绕它来写，此时日程状态简单带一笔作为背景就够。\n"
+            "- 合不上的话题就当没看见。绝对禁止每一次分享都盯着最近的对话来写。\n"
+        )
+        return "\n\n【最近的对话】\n" + "\n".join(lines) + hint
 
     # ==================== 策略检查 ====================
 
