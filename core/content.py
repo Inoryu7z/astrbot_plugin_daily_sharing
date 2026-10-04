@@ -43,6 +43,13 @@ SHARE_SEMANTIC_INTEGRITY_BLOCK = """【核心原则：这是分享，不是压�
 
 如果当下的事没有分享价值，宁可不展开细节，用一句话带过你正在做什么，把重点放在你的感受或想法上。"""
 
+# 分享文案文风基调指令：口语化、反升华、反散文、篇幅克制（与语义完整性块配套注入所有分享文案提示词）
+SHARE_STYLE_BLOCK = """【文风基调：正常分享，不要表演写作】
+1. 口语化：像跟朋友随口聊天那样写，短句、大白话都可以，允许不那么工整。
+2. 严禁强行升华：不要在结尾拔高主题、总结人生道理、发出感慨或呼吁（如「这就是生活啊」「愿我们都能…」）。事情说完就收尾。
+3. 严禁写成散文：不要堆砌意象、比喻、排比和氛围渲染，不要刻意追求「文笔」。
+4. 篇幅克制：在能把事情讲清楚的前提下，能短则短，说完就停。"""
+
 
 class ContentService:
     def __init__(self, config: Dict, llm_func, context, db_manager, news_service=None, plugin=None):
@@ -375,6 +382,8 @@ class ContentService:
 
 {SHARE_SEMANTIC_INTEGRITY_BLOCK}
 
+{SHARE_STYLE_BLOCK}
+
 {user_info_prompt}
 {ctx['life_hint']}
 {ctx['chat_hint']}
@@ -454,6 +463,8 @@ class ContentService:
 你想和{target_str}分享一下现在的心情或想法。
 
 {SHARE_SEMANTIC_INTEGRITY_BLOCK}
+
+{SHARE_STYLE_BLOCK}
 
 {user_info_prompt}
 {ctx['life_hint']}
@@ -644,6 +655,8 @@ class ContentService:
 你看到了今天的{source_name}，想选择{share_count}条和{target_str}分享。
 
 {SHARE_SEMANTIC_INTEGRITY_BLOCK}
+
+{SHARE_STYLE_BLOCK}
 
 【事实核查指令】
 下面提供的新闻列表可能已经由系统预先完成了联网检索，包含了事件的真实细节。
@@ -896,6 +909,8 @@ class ContentService:
 
 {SHARE_SEMANTIC_INTEGRITY_BLOCK}
 
+{SHARE_STYLE_BLOCK}
+
 {user_info_prompt}
 {dynamics_prompt}
 {chat_hint_prompt}
@@ -992,6 +1007,8 @@ class ContentService:
 
 {SHARE_SEMANTIC_INTEGRITY_BLOCK}
 
+{SHARE_STYLE_BLOCK}
+
 {user_info_prompt}
 {ctx['life_hint']}
 {ctx['chat_hint']}
@@ -1070,6 +1087,8 @@ class ContentService:
 你想向{target_str}吐槽一下——那种"小烦恼"，不是愤怒，是带点幽默的抱怨。
 
 {SHARE_SEMANTIC_INTEGRITY_BLOCK}
+
+{SHARE_STYLE_BLOCK}
 
 {user_info_prompt}
 {ctx['life_hint']}
@@ -1189,6 +1208,8 @@ class ContentService:
 你现在的任务是：向{target_str}推荐【{target_work}】。
 
 {SHARE_SEMANTIC_INTEGRITY_BLOCK}
+
+{SHARE_STYLE_BLOCK}
 
 【核心指令】
 1. 必须基于下面的资料进行推荐，不要更换目标。
@@ -1471,6 +1492,8 @@ class ContentService:
             period_label=ctx['period_label'],
             candidates_formatted=candidates_formatted,
         )
+        # 统一文风基调：渲染后追加，自定义 topic_content_prompt 也能收到（str.format 多余 kwargs 会被忽略，但旧自定义模板无占位符，不能靠模板注入）
+        prompt += f"\n\n{SHARE_STYLE_BLOCK}"
 
         # 话题策略专用 LLM（留空则用人格默认）
         provider_id = ctx.get('topic_llm_provider_id', '') or None
