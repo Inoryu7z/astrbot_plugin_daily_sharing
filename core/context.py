@@ -287,15 +287,13 @@ class ContextService:
             if weather: parts.append(f"【今日天气】{weather}")
             
             # 2. 穿搭
-            # dayflow 顶层 outfit 只是"晨间第一套"，第二/三套写在 timeline 的 outfit_change 里。
-            # 这里以"当前生效的那套"为准（智能分享按 look 取，其余按当前时间推断），
-            # 晨间那套仅在已被换下时作为参考信息保留，避免配图/文案照抄早上那套。
+            # dayflow 新结构下三套穿搭全部写在 timeline 换装时段的 outfit_change 里（顶层 outfit 已废弃）。
+            # 这里以"当前生效的那套"为准（智能分享按 look 取，其余按当前时间推断）。
+            # 旧版曾在此附加【今日晨间穿搭（已换下）】——它把第一套全文重复注入一遍，
+            # 浪费 token 且对换套后的分享无价值，已按用户决策移除。
             current_outfit = resolve_current_outfit(data, look_key=look_key)
-            morning_outfit = str(data.get("outfit") or "").strip()
             if current_outfit:
                 parts.append(f"【你现在穿着的穿搭】{current_outfit}")
-            if morning_outfit and morning_outfit != current_outfit:
-                parts.append(f"【今日晨间穿搭（已换下，仅供了解，禁止用于当前画面）】{morning_outfit}")
             
             # 3. 完整元数据 (Meta)
             meta = data.get("meta", {})

@@ -248,7 +248,9 @@ class SmartShareScheduler:
         """从 dayflow 日程数据构建 LLM 输入文本"""
         parts = []
 
-        outfit = dayflow_data.get("outfit", "")
+        # 兼容新旧结构：旧结构顶层 outfit 承载第一套；新结构第一套在晨起时段 outfit_change
+        from .outfit import resolve_first_outfit
+        outfit = resolve_first_outfit(dayflow_data)
         if outfit:
             parts.append(f"【晨间第一套穿搭】\n{outfit}")
 

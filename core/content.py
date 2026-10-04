@@ -783,7 +783,9 @@ class ContentService:
             if not data or not isinstance(data, dict):
                 return {}
             timeline = data.get("timeline", [])
-            outfit = data.get("outfit", "")
+            # 兼容新旧结构：新结构顶层无 outfit 字段（第一套在晨起时段 outfit_change）
+            from .outfit import resolve_first_outfit
+            outfit = resolve_first_outfit(data)
             summary = data.get("summary", "")
             weather = data.get("weather", "")
             # timeline 字段是 time_start/time_end/title/detail，按时间区间取当前时段

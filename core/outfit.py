@@ -15,6 +15,36 @@ from typing import List, Optional
 LOOK_KEYS = ("look_1", "look_2", "look_3")
 
 
+def _norm_outfit_text(text) -> str:
+    """穿搭文本归一化：去全部空白后比对，用于识别晨起复读。"""
+    return "".join(str(text or "").split())
+
+
+def _split_first_and_rest(data: dict) -> tuple[str, list[dict]]:
+    """把 dayflow 日程数据拆为（晨间第一套, 后续换装列表[第二/三套]），兼容两种数据结构。
+
+    - 旧结构：顶层 ``outfit`` 字段承载第一套；timeline 换装时段里可能有一份
+      与顶层 outfit 相同的"晨起复读"（日程 LLM 在晨起时段把第一套又填进 outfit_change），
+      必须剔除——否则 look_2 会取到复读（=第一套），导致分享穿错套。
+    - 新结构（dayflow 顶层 outfit 字段已废弃）：第一套写在晨起时段的 outfit_change，
+      即换装列表的第 1 项；第 2/3 项为第二/三套。
+    """
+    data = data or {}
+    base = str(data.get("outfit") or "").strip()
+    changes = collect_outfit_changes(data.get("timeline"))
+    if base:
+        rest = [c for c in changes if _norm_outfit_text(c["outfit"]) != _norm_outfit_text(base)]
+        return base, rest
+    if changes:
+        return changes[0]["outfit"], changes[1:]
+    return "", []
+
+
+def resolve_first_outfit(data: dict) -> str:
+    """取晨间第一套穿搭（兼容新旧结构），供智能分享分析等场景使用。"""
+    return _split_first_and_rest(data or {})[0]
+
+
 def parse_hhmm(value) -> Optional[int]:
     """把 "08:30" 解析为一天中的分钟数；解析失败返回 None"""
     try:
@@ -54,31 +84,28 @@ def collect_outfit_changes(timeline) -> List[dict]:
 def resolve_outfit_by_look(data: dict, look_key: str) -> str:
     """按 look 身份取穿搭（智能分享用，不受执行时刻漂移影响）
 
-    - look_1：晨间第一套（顶层 outfit）
-    - look_2：第一个换装时段的那套
-    - look_3：最后一个换装时段的那套（需至少两个换装时段，与 dayflow 夜间款判定一致）
+    通过 _split_first_and_rest 兼容新旧两种 dayflow 数据结构：
+    - look_1：晨间第一套（旧结构=顶层 outfit；新结构=首个换装时段）
+    - look_2：第二套（剔除晨起复读后的第一个后续换装）
+    - look_3：最后一套（夜间居家装；需存在后续换装，与 dayflow 夜间款判定一致）
     """
-    data = data or {}
-    base = str(data.get("outfit") or "").strip()
-    changes = collect_outfit_changes(data.get("timeline"))
-
+    first, rest = _split_first_and_rest(data)
     if look_key == "look_1":
-        return base
+        return first
     if look_key == "look_2":
-        return changes[0]["outfit"] if changes else base
+        return rest[0]["outfit"] if rest else first
     if look_key == "look_3":
-        if len(changes) >= 2:
-            return changes[-1]["outfit"]
-        return changes[0]["outfit"] if changes else base
-    return base
+        return rest[-1]["outfit"] if rest else first
+    return first
 
 
 def resolve_current_outfit(data: dict, look_key: str = None, now=None) -> str:
     """解析"此刻 / 指定套"生效的穿搭
 
     look_key 有效时按身份取（智能分享路径，补偿触发导致真实时间漂移也不会穿错套）；
-    否则按当前时间推断：取最后一个 time_start <= now 的换装，
-    若当前时间早于任何换装则回退晨间第一套（顶层 outfit）。
+    否则按当前时间推断：取最后一个 time_start <= now 的换装。
+    当前时刻早于所有换装时段时：旧结构回退晨间第一套（顶层 outfit）；新结构返回空串
+    （晨起换装前角色尚未穿上第一套，无明确穿搭可注入）。
     """
     if look_key in LOOK_KEYS:
         return resolve_outfit_by_look(data, look_key)
@@ -86,6 +113,9 @@ def resolve_current_outfit(data: dict, look_key: str = None, now=None) -> str:
     data = data or {}
     base = str(data.get("outfit") or "").strip()
     changes = collect_outfit_changes(data.get("timeline"))
+    if base:
+        # 旧结构：剔除与顶层 outfit 相同的晨起复读，避免换装点被复读污染
+        changes = [c for c in changes if _norm_outfit_text(c["outfit"]) != _norm_outfit_text(base)]
     if not changes:
         return base
 
