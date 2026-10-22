@@ -162,6 +162,8 @@ class TaskManager:
                     f"[SmartShare] [{persona_name}] 今日已调度过但无待恢复任务"
                     f"（failed={state.get('failed')}），不重复触发"
                 )
+                # 失败回退日：random_ 任务同样随旧 scheduler 销毁，这里按 state 里的原定时间补排
+                await self._resume_random_if_lost(persona_name, state)
                 return
 
             # 4. 今日未调度，立即触发
@@ -183,6 +185,27 @@ class TaskManager:
                 await self._make_persona_daily_random_scheduler(persona_name)()
             except Exception:
                 pass
+
+    async def _resume_random_if_lost(self, persona_name: str, state: dict):
+        """回退随机日重载后补排 random_ 任务
+
+        场景：6 点智能调度失败 → 回退随机注册了 random_* date 任务 → 之后插件被重载，
+        MemoryJobStore 清空，而 _recover_pending_jobs 对智能人格直接跳过、_smart_init_today
+        又被 state.date == today 挡在 step3 —— 当天剩余分享会全部静默消失。
+
+        _make_persona_daily_random_scheduler 只在 random_schedule.date 与今日不符时才重新随机，
+        同一天重跑会复用已存的时间戳，所以这里重排不会换时间点，也不会重复分享
+        （已执行时段由 executed_periods 兜住）。
+        """
+        if not state.get("failed"):
+            return
+        prefix = f"persona_{persona_name}_random_"
+        if [j for j in self.scheduler.get_jobs() if j.id.startswith(prefix)]:
+            return
+        logger.info(
+            f"[DailySharing] 人格 [{persona_name}] 今日已回退随机但随机任务已丢失，按原定时间补排"
+        )
+        await self._make_persona_daily_random_scheduler(persona_name)()
 
     def setup_custom_target_crons(self, persona_name: str):
         receiver_conf = self.plugin.get_persona_receiver(persona_name)
