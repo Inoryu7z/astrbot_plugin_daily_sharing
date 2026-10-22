@@ -74,6 +74,10 @@ class SmartShareScheduler:
 
     SMART_STATE_KEY_TEMPLATE = "smart_{persona}"
 
+    # date 任务的误触发宽限（秒）。APScheduler 默认只有 1 秒，事件循环一旦卡顿超过 1 秒，
+    # date 任务会被判定 missed 后直接丢弃且不留插件侧日志。给足 10 分钟，宁可晚发也不静默丢。
+    SMART_JOB_MISFIRE_GRACE_SECONDS = 600
+
     def __init__(self, plugin):
         self.plugin = plugin
         self.db = plugin.db
@@ -711,7 +715,9 @@ class SmartShareScheduler:
         executed 已标记 True 但分享未执行，该套穿搭会被 recover_smart_state 永久跳过。
         """
         async def wrapper():
-            if self.plugin._is_terminated: return
+            if self.plugin._is_terminated:
+                logger.debug(f"[SmartShare] [{persona_name}] {look_key} 触发时插件已终止，跳过")
+                return
             # 先调用原始任务链路（DB清理 + execute_share）；第三套（晚间居家装）配图走独立晚间链路，
             # look_key 一并透传，让文案/配图按"这一套"取穿搭（补偿触发时间漂移也不会穿错）
             await self.task_manager._make_task_wrapper(persona_name, night_look=(look_key == "look_3"), look_key=look_key)()
@@ -814,9 +820,12 @@ class SmartShareScheduler:
             )
 
         # 准备状态（含第三套时追加 look_3）
+        # failed 必须显式写 False：update_state_dict 是合并写入，历史某次回退随机留下的
+        # failed=True 不会被覆盖，会让之后的 recover_smart_state 静默放弃恢复（date 任务全丢）
         state_key = self._get_state_key(persona_name)
         state = {
             "date": today_str,
+            "failed": False,
             "look_1": {
                 "share_time": picked_times["look_1"],
                 "wear_window": look_times["look_1"].get("wear_window", ""),
@@ -880,7 +889,8 @@ class SmartShareScheduler:
                 'date',
                 run_date=run_time,
                 id=job_id,
-                replace_existing=True
+                replace_existing=True,
+                misfire_grace_time=self.SMART_JOB_MISFIRE_GRACE_SECONDS
             )
             logger.info(
                 f"[SmartShare] [{persona_name}] {look_key} 已安排在 {run_time.strftime('%H:%M:%S')} 执行"
@@ -1033,12 +1043,16 @@ class SmartShareScheduler:
 
         today_str = datetime.now().strftime("%Y-%m-%d")
         if state.get("date") != today_str:
-            # 状态过期，清理
-            await self.db.update_state_dict(state_key, {})
+            # 状态过期：必须整行清空。update_state_dict 是合并写入，传空 dict 等于什么都没做
+            logger.info(
+                f"[SmartShare] [{persona_name}] state 日期 {state.get('date')} 非今日，清空后跳过恢复"
+            )
+            await self.db.set_state(state_key, {})
             return
 
         # 今日智能调度已失败（已回退随机），不恢复智能任务
         if state.get("failed"):
+            logger.info(f"[SmartShare] [{persona_name}] 今日已回退随机（failed=True），不恢复智能任务")
             return
 
         now = datetime.now()
@@ -1048,6 +1062,7 @@ class SmartShareScheduler:
 
         # 如果任务还存在，不处理
         if existing_jobs:
+            logger.debug(f"[SmartShare] [{persona_name}] date 任务仍在调度器中，无需恢复")
             return
 
         # 任务丢失，根据 state 重新注册（look_1/look_2 必选，look_3 可选，按 state 实际存在动态处理）
@@ -1065,6 +1080,11 @@ class SmartShareScheduler:
             wear_window = look_state.get("wear_window", "")
             parsed = self._parse_hhmm(share_time)
             if not parsed:
+                # 解析不出来就等于这套永久丢（_smart_init_today 见 date==today 不会再补），必须留痕
+                logger.warning(
+                    f"[SmartShare] [{persona_name}] 恢复时 {look_key} 的 share_time 无法解析: "
+                    f"{share_time!r}，跳过本次恢复"
+                )
                 continue
             h, m = parsed
             run_time = now.replace(hour=h, minute=m, second=0, microsecond=0)
@@ -1096,7 +1116,8 @@ class SmartShareScheduler:
                 'date',
                 run_date=run_time,
                 id=job_id,
-                replace_existing=True
+                replace_existing=True,
+                misfire_grace_time=self.SMART_JOB_MISFIRE_GRACE_SECONDS
             )
             re_registered += 1
             logger.info(f"[SmartShare] [{persona_name}] 恢复 {look_key} 任务: {run_time.strftime('%H:%M:%S')}")

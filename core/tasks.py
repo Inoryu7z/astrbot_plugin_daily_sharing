@@ -149,6 +149,7 @@ class TaskManager:
             task_prefix = f"persona_{persona_name}_smart_share_"
             existing = [j for j in self.scheduler.get_jobs() if j.id.startswith(task_prefix)]
             if existing:
+                logger.debug(f"[SmartShare] [{persona_name}] 已有 {len(existing)} 个 date 任务，无需补调度")
                 return
 
             # 3. 检查今日是否已调度过（state 存在但任务已执行/跳过）
@@ -157,6 +158,10 @@ class TaskManager:
             )
             today_str = datetime.now().strftime("%Y-%m-%d")
             if state.get("date") == today_str:
+                logger.debug(
+                    f"[SmartShare] [{persona_name}] 今日已调度过但无待恢复任务"
+                    f"（failed={state.get('failed')}），不重复触发"
+                )
                 return
 
             # 4. 今日未调度，立即触发
