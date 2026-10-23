@@ -112,9 +112,10 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
                 return pr
         return self.receiver_conf if self.receiver_conf else {"groups": [], "users": [], "adapter_id": ""}
 
-    @staticmethod
-    def _persona_name_of_entry(entry: dict) -> str:
-        return entry.get("persona_name") or entry.get("name") or entry.get("select_persona", "")
+    def _persona_name_of_entry(self, entry: dict) -> str:
+        """条目的人格标识；与 _find_persona_config 的别名口径一致，避免只填 persona_id/alias 的条目被漏掉"""
+        aliases = self._persona_aliases(entry) if isinstance(entry, dict) else []
+        return aliases[0] if aliases else ""
 
     async def _resolve_persona_from_framework(self, event) -> str:
         """按 AstrBot 口径解析当前会话实际生效的人格名
@@ -161,6 +162,11 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
         else:
             name = ""
         if not name:
+            return ""
+        # 框架给的人格不一定归本插件管（例如 AstrBot 的默认人格）。直接透传会让下游
+        # get_persona_receiver / get_persona_config_value 全部退化到全局配置、锁 key 也对不上，
+        # 所以这里只认插件 personas 里真实存在的人格。
+        if not self._find_persona_config(name):
             return ""
         return self._canonical_persona_name(name) or name
 
@@ -213,10 +219,22 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
         return ""
 
     async def resolve_persona_from_event(self, event) -> str:
+        """当前会话的人格：框架（仅限插件已配置的人格）→ 投递目标反查 → 第一个人格
+
+        末级 entries[0] 是为兼容 /分享、LLM 工具的历史行为保留的；/重新调度 走的是
+        _resolve_event_persona，不会静默落到第一个人格。
+        """
         try:
-            name = await self._resolve_event_persona(event)
+            name = await self._resolve_persona_from_framework(event)
             if name:
                 return name
+        except Exception:
+            pass
+        try:
+            names = [n for n in (self._persona_name_of_entry(e) for e in self.get_enabled_personas()) if n]
+            hits = self._match_personas_by_receiver(event, names)
+            if len(hits) == 1:
+                return hits[0]
         except Exception:
             pass
         entries = self.get_enabled_personas()
@@ -224,7 +242,6 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
             first_name = self._persona_name_of_entry(entries[0])
             if first_name:
                 return self._canonical_persona_name(first_name) or first_name
-        return ""
         return ""
 
     def _inject_qzone_client(self, qzone_plugin):
@@ -482,8 +499,9 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
     async def handle_reschedule(self, event: AstrMessageEvent):
         """用智能调度重新安排当日分享时间
 
-        只重选时间点，不重新生成 dayflow 日程；当天已经分享过的那套会保留原状态跳过。
-        不带参数时对当前会话所属人格生效，也可以 `/重新调度 人格名` 指定。
+        只重选时间点，不重新生成穿搭内容；当日日程缺失时 `ensure_dayflow_ready` 会顺带触发生成
+        （可能等较久，取决于 dayflow）。当天已经分享过的那套会保留原状态跳过。
+        不带参数时按当前会话对应的分享人格生效，也可以 `/重新调度 人格名` 指定。
         """
         if self._is_terminated:
             return
@@ -498,34 +516,45 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
                 names.append(self._canonical_persona_name(raw) or raw)
 
         if target:
-            matched = [n for n in names if n == target] or [n for n in names if target in n]
+            matched = [n for n in names if n == target]
+            if not matched:
+                matched = [n for n in names if target in n]
             if not matched:
                 yield event.plain_result(
                     f"未找到人格：{target}\n可调度：{'、'.join(names) if names else '（未配置人格）'}"
                 )
                 return
+            if len(matched) > 1:
+                yield event.plain_result(
+                    f"「{target}」匹配到多个人格：{'、'.join(matched)}\n请写完整的人格名"
+                )
+                return
             persona_name = matched[0]
         else:
-            # 先按框架口径（umo 会话规则 > 会话绑定 > 全局默认）取当前人格；
-            # 取不到或不属于本插件时再按投递目标反查，绝不兜底成第一个人格
-            persona_name = await self._resolve_event_persona(event)
-            if persona_name not in names:
-                hits = self._match_personas_by_receiver(event, names)
-                if len(hits) == 1:
-                    persona_name = hits[0]
-                elif len(hits) > 1:
+            # 投递映射优先：本插件是按 persona_receiver 把不同会话分给不同人格的，
+            # 这一步才是"这个群的分享由谁发"的权威来源；框架人格只用来裁决歧义与兜底。
+            hits = self._match_personas_by_receiver(event, names)
+            framework_name = await self._resolve_event_persona(event)
+            if len(hits) == 1:
+                persona_name = hits[0]
+            elif len(hits) > 1:
+                if framework_name in hits:
+                    persona_name = framework_name
+                else:
                     yield event.plain_result(
                         f"这个会话同时挂在多个人格下：{'、'.join(hits)}\n请指定：/重新调度 人格名"
                     )
                     return
-                elif len(names) == 1:
-                    persona_name = names[0]
-                else:
-                    yield event.plain_result(
-                        f"无法确定当前会话属于哪个人格，请指定：/重新调度 人格名\n"
-                        f"可调度：{'、'.join(names) if names else '（未配置人格）'}"
-                    )
-                    return
+            elif framework_name in names:
+                persona_name = framework_name
+            elif len(names) == 1:
+                persona_name = names[0]
+            else:
+                yield event.plain_result(
+                    f"无法确定当前会话属于哪个人格，请指定：/重新调度 人格名\n"
+                    f"可调度：{'、'.join(names) if names else '（未配置人格）'}"
+                )
+                return
 
         if not self.smart_scheduler._is_smart_share_enabled(persona_name):
             yield event.plain_result(f"[{persona_name}] 未启用智能调度，无法重新调度。")
@@ -543,8 +572,16 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
     async def _reschedule_today(self, event: AstrMessageEvent, persona_name: str):
         """后台执行重新调度，完成后把新时间回报到原会话"""
         try:
+            state_key = self.smart_scheduler._get_state_key(persona_name)
+            before = await self.db.get_state(state_key, {})
             ok = await self.smart_scheduler.run_smart_schedule(persona_name)
-            state = await self.db.get_state(self.smart_scheduler._get_state_key(persona_name), {})
+            state = await self.db.get_state(state_key, {})
+            # register_smart_jobs 每次成功都会刷新 registered_at。
+            # 没刷新说明 run_smart_schedule 只是在"该人格正在调度中"分支返回了 True，
+            # 此时报"完成"是假成功，必须单独说清楚。
+            did_register = bool(state.get("registered_at")) and (
+                state.get("registered_at") != before.get("registered_at")
+            )
             lines = []
             for key in ("look_1", "look_2", "look_3"):
                 item = state.get(key)
@@ -559,9 +596,15 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
                 lines.append(
                     f"{key}：{item.get('share_time', '?')}（{item.get('wear_window', '?')}，{status}）"
                 )
-            if ok and lines:
+            if ok and did_register and lines:
                 await event.send(
                     event.plain_result(f"[{persona_name}] 重新调度完成\n" + "\n".join(lines))
+                )
+            elif ok:
+                await event.send(
+                    event.plain_result(
+                        f"[{persona_name}] 该人格的智能调度正在进行中，本次没有重排，请稍后再试。"
+                    )
                 )
             else:
                 await event.send(

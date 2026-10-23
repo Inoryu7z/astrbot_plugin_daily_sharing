@@ -85,6 +85,9 @@ class SmartShareScheduler:
         self.task_manager = plugin.task_manager
         # 正在运行智能调度的 persona 集合，防止 6 点 cron 与 _smart_init_today 并发
         self._running_personas = set()
+        # 正在执行分享的 {(persona, look_key)}：任务已 fire 但还没回写 executed 的窗口期内，
+        # 手动重排必须当它是"已分享"，否则会把同一套再排一次（remove_job 对已取出执行的任务无效）
+        self._running_looks = set()
         # 跨人格串行化锁：串行化 analyze_schedule + register_smart_jobs，
         # 让后注册者的 LLM 能看到先注册者的 share_time，实现均匀分布
         self._registration_lock = asyncio.Lock()
@@ -718,19 +721,24 @@ class SmartShareScheduler:
             if self.plugin._is_terminated:
                 logger.debug(f"[SmartShare] [{persona_name}] {look_key} 触发时插件已终止，跳过")
                 return
-            # 先调用原始任务链路（DB清理 + execute_share）；第三套（晚间居家装）配图走独立晚间链路，
-            # look_key 一并透传，让文案/配图按"这一套"取穿搭（补偿触发时间漂移也不会穿错）
-            await self.task_manager._make_task_wrapper(persona_name, night_look=(look_key == "look_3"), look_key=look_key)()
-            # 执行后再标记该 look 为已执行（防止插件重载后 recover_smart_state 重复注册）
+            running_key = (persona_name, look_key)
+            self._running_looks.add(running_key)
             try:
-                state_key = self._get_state_key(persona_name)
-                state = await self.db.get_state(state_key, {})
-                look_state = state.get(look_key)
-                if isinstance(look_state, dict):
-                    look_state["executed"] = True
-                    await self.db.update_state_dict(state_key, state)
-            except Exception as e:
-                logger.warning(f"[SmartShare] [{persona_name}] 标记 {look_key} 已执行失败: {e}")
+                # 先调用原始任务链路（DB清理 + execute_share）；第三套（晚间居家装）配图走独立晚间链路，
+                # look_key 一并透传，让文案/配图按"这一套"取穿搭（补偿触发时间漂移也不会穿错）
+                await self.task_manager._make_task_wrapper(persona_name, night_look=(look_key == "look_3"), look_key=look_key)()
+                # 执行后再标记该 look 为已执行（防止插件重载后 recover_smart_state 重复注册）
+                try:
+                    state_key = self._get_state_key(persona_name)
+                    state = await self.db.get_state(state_key, {})
+                    look_state = state.get(look_key)
+                    if isinstance(look_state, dict):
+                        look_state["executed"] = True
+                        await self.db.update_state_dict(state_key, state)
+                except Exception as e:
+                    logger.warning(f"[SmartShare] [{persona_name}] 标记 {look_key} 已执行失败: {e}")
+            finally:
+                self._running_looks.discard(running_key)
         return wrapper
 
     async def register_smart_jobs(self, persona_name: str, look_times: dict):
@@ -826,19 +834,37 @@ class SmartShareScheduler:
 
         # 同日重排（手动 /重新调度 / 重新生成日程后）不能把已经分享过的套再排一遍：过去的时间点会命中
         # "时间点已过但仍在穿搭时段内" 的补偿分支，立刻再发一次。
-        # 只在 state 属于今天、且不是"回退随机"写下的（failed=True 时 look 条目是前一天的残留）时才继承；
-        # 6 点 cron 拿到的 state 是昨天的，也不会误继承。
-        carried_keys = set()
+        # 判据用 registered_at（今天由本函数写过）而不是 failed 这类聚合标志：
+        #   - 回退随机日的 look 条目是前一天的残留（registered_at 停在昨天），不能继承；
+        #   - 当天已排过、之后 _smart_init_today 异常把 failed 置 True 的情况，registered_at 仍是今天，必须继承。
+        # 没有 registered_at 的历史数据退回旧判据（date==今天 且 failed 不为真）。
+        carried = {}
         old_state = await self.db.get_state(state_key, {})
-        if old_state.get("date") == today_str and not old_state.get("failed"):
+        registered_at = str(old_state.get("registered_at") or "")
+        if registered_at:
+            is_todays_registration = registered_at.startswith(today_str)
+        else:
+            is_todays_registration = (
+                old_state.get("date") == today_str and not old_state.get("failed")
+            )
+        if is_todays_registration:
             for k in present_keys:
                 old_look = old_state.get(k)
                 if isinstance(old_look, dict) and (old_look.get("executed") or old_look.get("skipped")):
-                    carried_keys.add(k)
+                    carried[k] = old_look
+
+        # 正在执行中的套（任务已 fire、还没回写 executed）同样不能重排，否则同一套会再发一次
+        for k in present_keys:
+            if (persona_name, k) in self._running_looks and k not in carried:
+                carried[k] = old_state.get(k) if isinstance(old_state.get(k), dict) else {
+                    "share_time": picked_times[k],
+                    "wear_window": look_times[k].get("wear_window", ""),
+                }
 
         state = {
             "date": today_str,
             "failed": False,
+            "registered_at": now.strftime("%Y-%m-%d %H:%M:%S"),
             "look_1": {
                 "share_time": picked_times["look_1"],
                 "wear_window": look_times["look_1"].get("wear_window", ""),
@@ -857,15 +883,18 @@ class SmartShareScheduler:
                 "executed": False
             }
 
-        # 继承今天已经分享过的标记（同日重排场景），避免被重新排到过去时段后立刻补偿重发
-        for k in carried_keys:
-            state[k]["executed"] = True
+        # 继承的套整块保留原记录（share_time / wear_window / skipped 都是既成事实，不能拿新排的覆盖），
+        # 只在原块上补 executed=True
+        for k, old_look in carried.items():
+            merged = {"share_time": "", "wear_window": "", **state[k], **old_look}
+            merged["executed"] = True
+            state[k] = merged
 
         # 注册任务
         for idx, look_key in enumerate(present_keys):
-            if look_key in carried_keys:
+            if look_key in carried:
                 logger.info(
-                    f"[SmartShare] [{persona_name}] {look_key} 今日已分享过，重排时保留原状态不重复注册"
+                    f"[SmartShare] [{persona_name}] {look_key} 今日已分享/执行中，重排时保留原状态不重复注册"
                 )
                 continue
             share_time = picked_times[look_key]
