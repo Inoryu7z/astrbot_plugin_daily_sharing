@@ -392,6 +392,91 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
         # 3. 直接返回空字符串，让 LLM 闭嘴，不再生成回复
         return None
 
+    @filter.command("重新调度")
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    async def handle_reschedule(self, event: AstrMessageEvent):
+        """用智能调度重新安排当日分享时间
+
+        只重选时间点，不重新生成 dayflow 日程；当天已经分享过的那套会保留原状态跳过。
+        不带参数时对当前会话所属人格生效，也可以 `/重新调度 人格名` 指定。
+        """
+        if self._is_terminated:
+            return
+
+        parts = event.message_str.strip().split()
+        target = parts[1] if len(parts) > 1 else ""
+
+        names = []
+        for entry in self.get_enabled_personas():
+            raw = entry.get("persona_name") or entry.get("name") or entry.get("select_persona", "")
+            if raw:
+                names.append(self._canonical_persona_name(raw) or raw)
+
+        if target:
+            matched = [n for n in names if n == target] or [n for n in names if target in n]
+            if not matched:
+                yield event.plain_result(
+                    f"未找到人格：{target}\n可调度：{'、'.join(names) if names else '（未配置人格）'}"
+                )
+                return
+            persona_name = matched[0]
+        else:
+            persona_name = await self.resolve_persona_from_event(event)
+            if not persona_name:
+                yield event.plain_result("无法确定当前人格，请指定：/重新调度 人格名")
+                return
+
+        if not self.smart_scheduler._is_smart_share_enabled(persona_name):
+            yield event.plain_result(f"[{persona_name}] 未启用智能调度，无法重新调度。")
+            return
+
+        if persona_name in self.smart_scheduler._running_personas:
+            yield event.plain_result(f"[{persona_name}] 智能调度正在进行中，请稍后再试。")
+            return
+
+        yield event.plain_result(f"[{persona_name}] 正在按今日日程重新调度分享时间...")
+        task = asyncio.create_task(self._reschedule_today(event, persona_name))
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
+
+    async def _reschedule_today(self, event: AstrMessageEvent, persona_name: str):
+        """后台执行重新调度，完成后把新时间回报到原会话"""
+        try:
+            ok = await self.smart_scheduler.run_smart_schedule(persona_name)
+            state = await self.db.get_state(self.smart_scheduler._get_state_key(persona_name), {})
+            lines = []
+            for key in ("look_1", "look_2", "look_3"):
+                item = state.get(key)
+                if not isinstance(item, dict):
+                    continue
+                if item.get("skipped"):
+                    status = "已跳过（时间已过）"
+                elif item.get("executed"):
+                    status = "已分享过"
+                else:
+                    status = "待分享"
+                lines.append(
+                    f"{key}：{item.get('share_time', '?')}（{item.get('wear_window', '?')}，{status}）"
+                )
+            if ok and lines:
+                await event.send(
+                    event.plain_result(f"[{persona_name}] 重新调度完成\n" + "\n".join(lines))
+                )
+            else:
+                await event.send(
+                    event.plain_result(
+                        f"[{persona_name}] 重新调度失败：dayflow 日程未就绪或 LLM 未给出有效时间，原计划未改动。"
+                    )
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error(f"[DailySharing] 重新调度失败 [{persona_name}]: {e}")
+            try:
+                await event.send(event.plain_result(f"[{persona_name}] 重新调度出错：{e}"))
+            except Exception:
+                pass
+
     @filter.command("分享")
     @filter.permission_type(filter.PermissionType.ADMIN)
     async def handle_share_main(self, event: AstrMessageEvent):

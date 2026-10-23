@@ -823,6 +823,19 @@ class SmartShareScheduler:
         # failed 必须显式写 False：update_state_dict 是合并写入，历史某次回退随机留下的
         # failed=True 不会被覆盖，会让之后的 recover_smart_state 静默放弃恢复（date 任务全丢）
         state_key = self._get_state_key(persona_name)
+
+        # 同日重排（手动 /重新调度 / 重新生成日程后）不能把已经分享过的套再排一遍：过去的时间点会命中
+        # "时间点已过但仍在穿搭时段内" 的补偿分支，立刻再发一次。
+        # 只在 state 属于今天、且不是"回退随机"写下的（failed=True 时 look 条目是前一天的残留）时才继承；
+        # 6 点 cron 拿到的 state 是昨天的，也不会误继承。
+        carried_keys = set()
+        old_state = await self.db.get_state(state_key, {})
+        if old_state.get("date") == today_str and not old_state.get("failed"):
+            for k in present_keys:
+                old_look = old_state.get(k)
+                if isinstance(old_look, dict) and (old_look.get("executed") or old_look.get("skipped")):
+                    carried_keys.add(k)
+
         state = {
             "date": today_str,
             "failed": False,
@@ -844,8 +857,17 @@ class SmartShareScheduler:
                 "executed": False
             }
 
+        # 继承今天已经分享过的标记（同日重排场景），避免被重新排到过去时段后立刻补偿重发
+        for k in carried_keys:
+            state[k]["executed"] = True
+
         # 注册任务
         for idx, look_key in enumerate(present_keys):
+            if look_key in carried_keys:
+                logger.info(
+                    f"[SmartShare] [{persona_name}] {look_key} 今日已分享过，重排时保留原状态不重复注册"
+                )
+                continue
             share_time = picked_times[look_key]
             wear_window = look_times[look_key].get("wear_window", "")
 
@@ -897,8 +919,10 @@ class SmartShareScheduler:
                 f"（穿搭时段: {wear_window}）"
             )
 
-        # 保存状态
-        await self.db.update_state_dict(state_key, state)
+        # 保存状态：必须整行覆盖，不能 merge。
+        # merge 会把"重新生成日程后不再存在的 look_3"这类旧键留在 state 里，
+        # recover_smart_state 会照着它把过期的第三套重新注册出来（穿错套 / 重复分享）。
+        await self.db.set_state(state_key, state)
 
         # 防御性检查：确保 cron 未被误删（register_smart_jobs 清理由 _smart_share_ 前缀保护，
         # 但以防其他路径意外移除，注册完任务后验证 cron 是否存活）
