@@ -112,34 +112,119 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
                 return pr
         return self.receiver_conf if self.receiver_conf else {"groups": [], "users": [], "adapter_id": ""}
 
+    @staticmethod
+    def _persona_name_of_entry(entry: dict) -> str:
+        return entry.get("persona_name") or entry.get("name") or entry.get("select_persona", "")
+
+    async def _resolve_persona_from_framework(self, event) -> str:
+        """按 AstrBot 口径解析当前会话实际生效的人格名
+
+        顺序：umo 级 session_service_config 强制人格 > 会话绑定 persona > 全局默认人格。
+        这是唯一能正确处理「用户 d 绑 f 人格」这类会话规则的路径 —— 只读 conversation.persona_id
+        会漏掉 umo 级会话规则。
+        """
+        umo = getattr(event, "unified_msg_origin", None)
+        persona_mgr = getattr(self.context, "persona_manager", None)
+        if not umo or not persona_mgr:
+            return ""
+
+        conv_pid = None
+        try:
+            conv_mgr = getattr(self.context, "conversation_manager", None)
+            if conv_mgr:
+                conv_id = await conv_mgr.get_curr_conversation_id(umo)
+                if conv_id:
+                    conv = await conv_mgr.get_conversation(conv_id)
+                    conv_pid = getattr(conv, "persona_id", None) if conv else None
+        except Exception:
+            conv_pid = None
+
+        try:
+            platform_name = event.get_platform_name() or ""
+        except Exception:
+            platform_name = ""
+
+        try:
+            _pid, persona, _force, _webchat = await persona_mgr.resolve_selected_persona(
+                umo=umo,
+                conversation_persona_id=conv_pid,
+                platform_name=platform_name,
+            )
+        except Exception as e:
+            logger.debug(f"[DailySharing] 框架人格解析失败（降级到其它方式）: {e}")
+            return ""
+
+        if isinstance(persona, dict):
+            name = persona.get("name") or ""
+        elif persona is not None:
+            name = getattr(persona, "name", "") or ""
+        else:
+            name = ""
+        if not name:
+            return ""
+        return self._canonical_persona_name(name) or name
+
+    def _match_personas_by_receiver(self, event, names: list = None) -> list:
+        """按 persona_receiver 配置反查：这个会话（umo）挂在哪个人格下"""
+        umo = getattr(event, "unified_msg_origin", "") or ""
+        parts = umo.split(":")
+        if len(parts) < 3:
+            return []
+        adapter_id, msg_type = parts[0], parts[1]
+        target_id = ":".join(parts[2:])
+        is_group = "Group" in msg_type
+
+        if names is None:
+            names = [self._persona_name_of_entry(e) for e in self.get_enabled_personas()]
+        names = [n for n in names if n]
+
+        hits = []
+        for name in names:
+            # 只看人格自己配的 persona_receiver：get_persona_receiver 在人格未配置时会回退全局，
+            # 那样会让所有人格都命中同一个目标，反查就失去意义。
+            item = self._find_persona_config(name) or {}
+            receiver = item.get("persona_receiver") or {}
+            conf_ids = self.task_manager._parse_targets_config(
+                receiver.get("groups" if is_group else "users", [])
+            )
+            if target_id not in {str(k) for k in conf_ids.keys()}:
+                continue
+            conf_adapter = (receiver.get("adapter_id") or "").strip()
+            if conf_adapter and conf_adapter != adapter_id:
+                continue
+            hits.append(name)
+        return hits
+
+    async def _resolve_event_persona(self, event) -> str:
+        """当前会话对应的人格名；解析不出来返回空串（绝不兜底成第一个人格）"""
+        try:
+            name = await self._resolve_persona_from_framework(event)
+            if name:
+                return name
+        except Exception:
+            pass
+        try:
+            names = [self._persona_name_of_entry(e) for e in self.get_enabled_personas()]
+            hits = self._match_personas_by_receiver(event, [n for n in names if n])
+            if len(hits) == 1:
+                return hits[0]
+        except Exception:
+            pass
+        return ""
+
     async def resolve_persona_from_event(self, event) -> str:
         try:
-            session_id = getattr(event, "unified_msg_origin", None)
-            if session_id:
-                conv_mgr = getattr(self.context, "conversation_manager", None)
-                if conv_mgr:
-                    conv_id = await conv_mgr.get_curr_conversation_id(session_id)
-                    if conv_id:
-                        conv = await conv_mgr.get_conversation(conv_id)
-                        if conv:
-                            bound_pid = getattr(conv, "persona_id", None)
-                            if bound_pid:
-                                persona_mgr = getattr(self.context, "persona_manager", None)
-                                if persona_mgr:
-                                    persona_obj = await persona_mgr.get_persona(bound_pid)
-                                    if persona_obj:
-                                        name = getattr(persona_obj, "name", "") or getattr(persona_obj, "persona_id", "")
-                                        if name:
-                                            canonical = self._canonical_persona_name(name)
-                                            if canonical:
-                                                return canonical
+            name = await self._resolve_event_persona(event)
+            if name:
+                return name
         except Exception:
             pass
         entries = self.get_enabled_personas()
         if entries:
-            first_name = entries[0].get("persona_name") or entries[0].get("name") or entries[0].get("select_persona", "")
+            first_name = self._persona_name_of_entry(entries[0])
             if first_name:
                 return self._canonical_persona_name(first_name) or first_name
+        return ""
         return ""
 
     def _inject_qzone_client(self, qzone_plugin):
@@ -408,7 +493,7 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
 
         names = []
         for entry in self.get_enabled_personas():
-            raw = entry.get("persona_name") or entry.get("name") or entry.get("select_persona", "")
+            raw = self._persona_name_of_entry(entry)
             if raw:
                 names.append(self._canonical_persona_name(raw) or raw)
 
@@ -421,10 +506,26 @@ class DailySharingPlugin(Star, PersonaConfigMixin):
                 return
             persona_name = matched[0]
         else:
-            persona_name = await self.resolve_persona_from_event(event)
-            if not persona_name:
-                yield event.plain_result("无法确定当前人格，请指定：/重新调度 人格名")
-                return
+            # 先按框架口径（umo 会话规则 > 会话绑定 > 全局默认）取当前人格；
+            # 取不到或不属于本插件时再按投递目标反查，绝不兜底成第一个人格
+            persona_name = await self._resolve_event_persona(event)
+            if persona_name not in names:
+                hits = self._match_personas_by_receiver(event, names)
+                if len(hits) == 1:
+                    persona_name = hits[0]
+                elif len(hits) > 1:
+                    yield event.plain_result(
+                        f"这个会话同时挂在多个人格下：{'、'.join(hits)}\n请指定：/重新调度 人格名"
+                    )
+                    return
+                elif len(names) == 1:
+                    persona_name = names[0]
+                else:
+                    yield event.plain_result(
+                        f"无法确定当前会话属于哪个人格，请指定：/重新调度 人格名\n"
+                        f"可调度：{'、'.join(names) if names else '（未配置人格）'}"
+                    )
+                    return
 
         if not self.smart_scheduler._is_smart_share_enabled(persona_name):
             yield event.plain_result(f"[{persona_name}] 未启用智能调度，无法重新调度。")
