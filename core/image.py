@@ -1,5 +1,6 @@
 import os
 import re
+import inspect
 from datetime import datetime
 from typing import Optional
 from astrbot.api import logger
@@ -12,6 +13,19 @@ OUTFIT_LOCK_BLOCK = """【穿搭硬性要求（最高优先级，覆盖其他任
 严禁使用其他时段（含"晨间穿搭"）的服装，严禁自行编造、替换或混搭任何单品。"""
 
 class ImageService:
+    # 敏感错误关键词分组：判定顺序必须是 output → text → image，
+    # 因为 "imagesensitive" 会把 OutputImageSensitiveContentDetected 一并吞掉。
+    _SENSITIVE_OUTPUT_MARKS = (
+        "outputimagesensitive", "output_image_sensitive",
+        "outputtextsensitive", "output_text_sensitive",
+    )
+    _SENSITIVE_TEXT_MARKS = (
+        "inputtextsensitive", "input_text_sensitive", "textsensitive",
+    )
+    _SENSITIVE_IMAGE_MARKS = (
+        "inputimagesensitive", "input_image_sensitive", "imagesensitive",
+    )
+
     def __init__(self, context, config, llm_func, plugin=None):
         self.context = context
         self.config = config
@@ -234,10 +248,10 @@ class ImageService:
             if attempt < max_sensitive_retries:
                 if sensitive_type == "image":
                     # 输入图片敏感：参考图本身被判定敏感，换提示词无用，直接用原文重试
-                    logger.warning(f"[DailySharing] 输入图片敏感(第{attempt+1}次)，直接用原提示词重试...")
+                    logger.warning(f"[DailySharing] 参考图敏感(第{attempt+1}/{1 + max_sensitive_retries}轮失败)，原提示词重跑链路...")
                 else:
-                    # 输入文本敏感：提示词触发敏感，调用 LLM 降低敏感度重新生成
-                    logger.warning(f"[DailySharing] 输入文本敏感(第{attempt+1}次)，重新生成提示词降敏感度...")
+                    # 文本/输出敏感：改提示词可能规避，调用 LLM 降低敏感度重新生成
+                    logger.warning(f"[DailySharing] 提示词或出图敏感(第{attempt+1}/{1 + max_sensitive_retries}轮失败)，重写提示词降敏感度...")
                     current_prompt = await self._regenerate_prompt_avoiding_sensitive(
                         content, life_context, current_prompt, persona_name, current_outfit=current_outfit
                     )
@@ -247,7 +261,7 @@ class ImageService:
                         return None
                     logger.info(f"[DailySharing] 重试配图 Prompt: {current_prompt[:80]}...")
             else:
-                logger.warning(f"[DailySharing] 配图因敏感内容被拦截，已重试{max_sensitive_retries}次，放弃配图仅发送文案")
+                logger.warning(f"[DailySharing] 配图链路 {1 + max_sensitive_retries} 轮全部被敏感拦截(每轮内含 provider 级重试)，放弃配图仅发送文案")
                 self._last_image_description = None
                 return None
 
@@ -492,6 +506,26 @@ class ImageService:
             clean = re.sub(r"\n?```$", "", clean)
         return clean.strip() or None
 
+    @classmethod
+    def _classify_sensitive_error(cls, err_text: str) -> str:
+        """把单次失败的报错归类为 output / text / image / other。"""
+        s = (err_text or "").lower()
+        if any(k in s for k in cls._SENSITIVE_OUTPUT_MARKS):
+            return "output"
+        if any(k in s for k in cls._SENSITIVE_TEXT_MARKS):
+            return "text"
+        if any(k in s for k in cls._SENSITIVE_IMAGE_MARKS):
+            return "image"
+        return "other"
+
+    @staticmethod
+    def _aiimg_supports_error_hook(aiimg) -> bool:
+        """aiimg 的 EditRouter.edit 是否支持 on_attempt_error 回调（旧版没有）。"""
+        try:
+            return "on_attempt_error" in inspect.signature(aiimg.edit.edit).parameters
+        except Exception:
+            return False
+
     async def _call_aiimg_selfie(self, prompt: str, persona_name: str = None, night: bool = False):
         self._ensure_plugin()
         if not self._aiimg_plugin:
@@ -499,6 +533,13 @@ class ImageService:
             return None, None
 
         aiimg = self._aiimg_plugin
+
+        # 收集本轮链路内每一次尝试的失败（由 aiimg 的 on_attempt_error 回调上报），
+        # 用于统计主导失败类型；旧版 aiimg 无此回调时保持空列表，退回单条错误判定。
+        attempt_errors: list[tuple[str, int, str]] = []
+
+        def _collect_attempt_error(pid, attempt_no, err):
+            attempt_errors.append((str(pid), int(attempt_no or 0), str(err)))
 
         try:
             resolved_persona = persona_name or await self._get_default_persona_name()
@@ -586,7 +627,7 @@ class ImageService:
                 logger.info(f"[DailySharing] 【DEBUG】完整 Prompt:\n{final_prompt}")
                 logger.info("=" * 60)
 
-            path_obj = await aiimg.edit.edit(
+            edit_kwargs = dict(
                 prompt=final_prompt,
                 images=ref_images,
                 backend=None,
@@ -594,6 +635,9 @@ class ImageService:
                 default_output=persona_default_output,
                 chain_override=chain_override,
             )
+            if self._aiimg_supports_error_hook(aiimg):
+                edit_kwargs["on_attempt_error"] = _collect_attempt_error
+            path_obj = await aiimg.edit.edit(**edit_kwargs)
 
             await self._auto_save_to_wardrobe(path_obj, resolved_persona, prompt=final_prompt)
 
@@ -604,24 +648,52 @@ class ImageService:
 
         except Exception as e:
             err_str = str(e).lower()
-            # 区分输入图片敏感 vs 输入文本敏感
+
+            # 优先按整轮链路的失败明细投票。只看最后一条错误会漏掉前面的主导类型：
+            # 比如 7 次尝试里 4 次出图敏感、2 次参考图敏感，最后一条恰好是参考图敏感，
+            # 就会用原提示词重跑 —— 但出图一直越界本身就说明提示词需要重写。
+            # 输入文本敏感与出图敏感统一计入"该换词"，参考图敏感单独计票。
+            if attempt_errors:
+                tally = {"output": 0, "text": 0, "image": 0, "other": 0}
+                for _pid, _no, _txt in attempt_errors:
+                    # attempt_no == 0 是 provider 构建失败（没发出过请求），不计入投票
+                    if _no == 0:
+                        continue
+                    tally[self._classify_sensitive_error(_txt)] += 1
+                rewrite_votes = tally["output"] + tally["text"]
+                # 敏感票必须压过非敏感票才投票：超时/网络抖动占多数时重跑或换词都没意义，
+                # 交给下面的单条判定处理，避免「1 次参考图敏感 + 6 次超时」被误判成原样重跑。
+                if rewrite_votes + tally["image"] > tally["other"]:
+                    logger.warning(
+                        f"[DailySharing] 本轮链路 {sum(tally.values())} 次失败分类: "
+                        f"出图/文本敏感 {rewrite_votes}、参考图敏感 {tally['image']}、其他 {tally['other']}"
+                    )
+                    if rewrite_votes >= tally["image"]:
+                        logger.warning("[DailySharing] 主导失败类型与提示词相关，判定需要重写提示词")
+                        return None, "text"
+                    logger.warning("[DailySharing] 主导失败类型为参考图敏感，判定用原提示词重跑")
+                    return None, "image"
+
+            # 无明细（旧版 aiimg / 链路外异常）时退回按最后一条错误判定
+            # 区分输出敏感 vs 输入图片敏感 vs 输入文本敏感
+            # OutputImageSensitiveContentDetected：生成结果被判敏感，改提示词有效，按文本敏感走降敏感度重写
+            # OutputTextSensitiveContentDetected：输出文本被判敏感，同上
             # InputImageSensitiveContentDetected：参考图本身被判定敏感，换提示词无用，直接原文重试
             # InputTextSensitiveContentDetected：提示词文本触发敏感，需要降敏感度重新生成
-            is_image_sensitive = any(kw in err_str for kw in [
-                "inputimagesensitivecontentdetected", "inputimagesensitive",
-                "input_image_sensitive", "imagesensitive",
-            ])
-            is_text_sensitive = any(kw in err_str for kw in [
-                "inputtextsensitivecontentdetected", "inputtextsensitive",
-                "input_text_sensitive", "textsensitive",
-            ])
+            # 注意：必须先判 output，否则 "imagesensitive" 会把 OutputImageSensitive 一起吞掉
+            is_output_sensitive = any(kw in err_str for kw in self._SENSITIVE_OUTPUT_MARKS)
+            is_image_sensitive = any(kw in err_str for kw in self._SENSITIVE_IMAGE_MARKS)
+            is_text_sensitive = any(kw in err_str for kw in self._SENSITIVE_TEXT_MARKS)
             is_general_sensitive = any(kw in err_str for kw in [
                 "sensitivecontent", "sensitive_content", "sensitive information",
                 "contentpolicy", "content_policy", "safety", "prohibited",
                 "nsfw", "inappropriate",
             ])
 
-            if is_image_sensitive:
+            if is_output_sensitive:
+                logger.warning(f"[DailySharing] 自拍生成因输出图片敏感被拦截（换提示词重试）: {e}")
+                return None, "text"
+            elif is_image_sensitive:
                 logger.warning(f"[DailySharing] 自拍生成因输入图片敏感被拦截: {e}")
                 return None, "image"
             elif is_text_sensitive:
